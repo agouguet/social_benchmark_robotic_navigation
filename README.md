@@ -1,1 +1,17 @@
-# social_benchmark_robotic_navigation
+# Benchmark for Social Robotic Navigation
+
+# Installation
+
+## Dependencies
+
+Tmuxinator
+
+Docker
+
+# Baselines
+
+
+
+# Metrics
+
+# Usage

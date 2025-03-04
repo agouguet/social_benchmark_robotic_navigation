@@ -1,0 +1,28 @@
+name: simple
+
+pre_window: 
+  - source /opt/ros/humble/setup.bash
+  - source ../../ros2_ws/install/setup.bash
+
+windows:
+  - navstack:
+      layout: tiled
+      panes:
+        - shell:
+        #ROS2
+        - bridge_unity:
+          - ros2 run ros_tcp_endpoint default_server_endpoint
+        - nav:
+          # - ros2 launch nav2_bringup navigation_launch.py
+          - ros2 launch unity_sim nav2.launch.py
+        - map_publisher:
+          - ros2 run unity_sim map_publisher.py
+        - rviz:
+          - ros2 launch unity_sim rviz.launch.py
+        - clear_global_costmap:
+          - ros2 service call /global_costmap/clear_entirely_global_costmap nav2_msgs/srv/ClearEntireCostmap -r 0.33
+        - clear_local_costmap:
+          - ros2 service call /local_costmap/clear_entirely_local_costmap nav2_msgs/srv/ClearEntireCostmap -r 0.33
+        - record:
+          - cd ../..
+          - ros2 run social_metrics record_metrics.py --ros-args -p method:=dwb

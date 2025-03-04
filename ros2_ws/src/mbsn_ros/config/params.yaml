@@ -1,0 +1,25 @@
+mbsn_sim:
+  ros__parameters:
+    polygon_size: 0.45
+    polygon_type: "hexagon"
+    odom: "robot_odom"
+    agents: "/social_sim/agents"
+    agents_trajectory: "agent/trajectories"
+    global_goal: "global_goal"
+    goal: "goal_pose"
+    scene_info: "/social_sim/scene_info"
+    polygon_map: "polygon_map"
+    robot_visibility_distance: 2.5
+
+mbsn_real:
+  ros__parameters:
+    polygon_size: 0.5
+    polygon_type: "hexagon"
+    odom: "odom"
+    agents: "/agents"
+    agents_trajectory: "agent/trajectories"
+    global_goal: "global_goal"
+    goal: "goal_pose"
+    scene_info: "/scene_info"
+    polygon_map: "polygon_map"
+    robot_visibility_distance: 5.0

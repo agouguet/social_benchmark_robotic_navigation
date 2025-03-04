@@ -1,0 +1,38 @@
+version: "3.8"
+
+networks:
+  ros:
+    driver: bridge
+
+services:
+  # ROS MASTER
+  ros-master:
+    image: ros:noetic
+    command: stdbuf -o L roscore
+    networks:
+      - ros
+
+  # ROS BRIDGE
+  ros_bridge:
+    # image: ros:foxy-ros1-bridge
+    image: my_ros1_bridge
+    depends_on:
+      - ros-master
+    environment:
+      - "ROS_MASTER_URI=http://ros-master:11311"
+    entrypoint: './ros_entrypoint.sh'
+    command: stdbuf -o L ros2 run ros1_bridge dynamic_bridge --bridge-all-topics
+    networks:
+      - ros
+
+  # SARL*
+  sarl_star:
+    image: agouguet/benchmark-social-navigation:cadrl
+    depends_on:
+      - ros-master
+    environment:
+      - "ROS_MASTER_URI=http://ros-master:11311"
+    entrypoint: ''
+    command: bash -c "sleep 1 && source /opt/ros/kinetic/setup.bash && source /root/cadrl_ws/devel/setup.bash && stdbuf -o L roslaunch cadrl_ros cadrl_node.launch"
+    networks:
+      - ros

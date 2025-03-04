@@ -1,0 +1,26 @@
+name: cadrl
+
+pre_window: 
+  - source /opt/ros/humble/setup.bash
+  - source ../../ros2_ws//install/setup.bash
+
+windows:
+  - navstack:
+      layout: tiled
+      panes:
+        - shell:
+        #Docker: ROS bridge + cadrl
+        - docker:
+          - docker compose up
+        #ROS2
+        - bridge_unity:
+          - ros2 run ros_tcp_endpoint default_server_endpoint
+        - map_publisher:
+          - ros2 run unity_sim map_publisher.py
+        - map_republisher:
+          - ros2 run unity_sim map_republisher.py
+        - rviz:
+          - ros2 launch unity_sim rviz.launch.py
+        - trial:
+          - cd ../..
+          - ros2 run social_metrics record_metrics.py --ros-args -p method:=cadrl
