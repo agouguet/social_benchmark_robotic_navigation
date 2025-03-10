@@ -4,7 +4,7 @@ This repository contains a benchmark for robotic social navigation. An evaluatio
 This benchmark is based on [SEAN](https://sean.interactive-machines.com), which is a simulator running under Unity3d allowing you to compare methods using metrics.
 On this new version, we have added the possibility of testing navigation methods under ROS2 by upgrading the simulator to ROS2. We added metrics and offered six everyday life scenarios, crowded and sparse scenarios.
 
-# Baselines
+## Baselines
 
 Here is the list of different baselines used for the comparison:
 
@@ -16,7 +16,7 @@ Here is the list of different baselines used for the comparison:
   - [BRNE](https://github.com/MurpheyLab/brne)
   - Ours, Heuristic-Based Social Navigation (HBSN)
 
-# Installation
+## Installation
 
 The experiments were conducted in Ubuntu 22.04 with ROS Humble and Unity 2022.3.10f1.
 
@@ -30,14 +30,14 @@ The experiments were conducted in Ubuntu 22.04 with ROS Humble and Unity 2022.3.
 ```
 
 
-## Dependencies
+### Dependencies
 
  * We recommend installing ```Tmux``` which is a terminal multiplexer and ```Tmuxinator``` which is a tool that allows you to easily manage tmux sessions using yaml files, we have provided different yaml files for each baseline in the folder ```~/social_benchmark_robotic_navigation/tmux/<navigation method>```. 
  * We used Docker to containerize all ROS1 baselines and used ros_bridge to be able to use our benchmark in ROS2. You can find the docker images [here](https://hub.docker.com/repository/docker/agouguet/benchmark-social-navigation/general).
  * For our method, it is enough to use the ros2 workspace present in this repository and build python module, in ```hbsn``` : ```pip install .```
  * For DWB use nav2 from ROS2.
 
-## Usage
+### Usage
 
 For example, to use HBSN method :
 
@@ -46,6 +46,11 @@ cd ~/benchmark_social_navigation/tmux/HBSN
 tmuxinator
 ```
 
-# Results
+## Results
 
 All data, human and robot positions and all metrics will be stored in a ```./analysis``` folder.
+
+
+## Questions
+
+If you have any questions, please contact adam.gouguet@imt-nord-europe.fr
