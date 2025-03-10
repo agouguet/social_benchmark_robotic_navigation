@@ -1,48 +1,29 @@
 #!/usr/bin/env python3
 from collections import defaultdict
-from itertools import combinations
-import math
-import os
-import random
-import time
 from abc import ABC, abstractmethod
 
 from matplotlib import pyplot as plt
-# from human_trajectory_prediction.human_trajctory_prediction_model import simple_human_trajectory_prediction
 
-import mbsn
-from mbsn.human_trajectory_prediction.human_trajctory_prediction_model import simple_human_trajectory_prediction
-from mbsn.mdp.State import State
-from mbsn.mdp.MBSN import MBSN
-from mbsn.mdp.agent import Agent
-from mbsn.polygonal_map.polygonal_map import PolygonalMap
-from mbsn.solver.MCTS import MBSNAgentMCTS
-from mbsn.solver.heuristicfunction import heuristic_rules_based, heuristic_score_based
-from mbsn.solver.multi_armed_bandit.ucb import UpperConfidenceBounds
-from mbsn.solver.qtable import QTable
+from hbsn.mdp.agent import Agent
+from hbsn.polygonal_map.polygonal_map import PolygonalMap
 import numpy as np
-from scipy.spatial import KDTree, Voronoi
 
-import rclpy # type: ignore
 from rclpy.node import Node # type: ignore
 
 
-from shapely import LineString, MultiPolygon, Point, Polygon, convex_hull, unary_union
-from shapely.ops import nearest_points
+from shapely import LineString, MultiPolygon, Point, Polygon
 from geometry_msgs.msg import Pose, Point as RosPoint # type: ignore
 from geometry_msgs.msg import PoseStamped # type: ignore
-from mbsn_ros.util import ros_point_to_shapely_point, ros_quaternion_to_euler
+from hbsn_ros.util import ros_point_to_shapely_point, ros_quaternion_to_euler
 from visualization_msgs.msg import Marker, MarkerArray # type: ignore
 from std_msgs.msg import Header # type: ignore
 from geometry_msgs.msg import PoseStamped # type: ignore
-from geometry_msgs.msg import PoseArray # type: ignore
 from geometry_msgs.msg import Twist # type: ignore
-from nav_msgs.msg import Odometry, OccupancyGrid # type: ignore
+from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path # type: ignore
 from agents_msgs.msg import AgentArray # type: ignore
-from graph_msgs.msg import GraphNav # type: ignore
 from simulation_msgs.msg import SceneInfo # type: ignore
-from agents_msgs.msg import AgentArray, AgentTrajectories, AgentTrajectory # type: ignore
+from agents_msgs.msg import AgentArray, AgentTrajectories # type: ignore
 from ament_index_python.packages import get_package_share_directory
 
 MIN_TIME_OCCUPANCY = 10
@@ -52,7 +33,7 @@ POURCENTAGE_AREA_OF_POLYGON_ACCEPTABLE = 0.5
 
 class Interpreter(Node):
 
-    def __init__(self, name_node="mbsn"):
+    def __init__(self, name_node="hbsn"):
         super().__init__(name_node)
 
         self.declare_parameters(

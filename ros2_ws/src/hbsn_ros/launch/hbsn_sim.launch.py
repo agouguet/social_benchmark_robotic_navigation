@@ -7,15 +7,15 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     config = os.path.join(
-        get_package_share_directory('mbsn_ros'),
+        get_package_share_directory('hbsn_ros'),
         'config',
-        'params_sim.yaml'
+        'params.yaml'
         )
         
     node=Node(
-        package = 'mbsn_ros',
-        name = 'mbsn_real',
-        executable = 'MBSN_real.py',
+        package = 'hbsn_ros',
+        name = 'hbsn',
+        executable = 'HBSN.py',
         parameters = [config]
     )
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(mbsn_ros)
+project(hbsn_ros)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -58,8 +58,7 @@ install(DIRECTORY
 ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS
-  scripts/MBSN_real.py
-  scripts/MBSN_sim.py
+  scripts/HBSN.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

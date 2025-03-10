@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>mbsn_ros</name>
+  <name>hbsn_ros</name>
   <version>0.0.0</version>
   <description>MDP-Based Social Navigation</description>
   <maintainer email="adam.gouguet@imt-nord-europe.fr">Adam Gouguet</maintainer>

@@ -1,4 +1,4 @@
-name: MBSN
+name: HBSN
 
 pre_window: 
   - source /opt/ros/humble/setup.bash
@@ -14,20 +14,12 @@ windows:
           - ros2 run ros_tcp_endpoint default_server_endpoint
         - map_publisher:
           - ros2 run unity_sim map_publisher.py
-        # - nav:
-        #   - ros2 launch nav2_bringup navigation_launch.py
         - global_path:
           - ros2 run base_nav global_planner.py
-        - mbsn:
-          - ros2 launch mbsn_ros mbsn_sim.launch.py
+        - hbsn:
+          - ros2 launch hbsn_ros hbsn_sim.launch.py
         - controller:
-          # - ros2 run base_nav dwa_controller.py --ros-args -p path_topic:=/local_path
           - ros2 run base_nav dwa_controller_social.py --ros-args -p path_topic:=/local_path
-
-        # - clear_global_costmap:
-        #   - ros2 service call /global_costmap/clear_entirely_global_costmap nav2_msgs/srv/ClearEntireCostmap -r 0.33
-        # - clear_local_costmap:
-        #   - ros2 service call /local_costmap/clear_entirely_local_costmap nav2_msgs/srv/ClearEntireCostmap -r 0.33
 
         - agent_trajectories:
           - ros2 run agent_trajectory_prediction agent_trajectory_prediction_publisher.py 
@@ -38,4 +30,4 @@ windows:
           - ros2 launch unity_sim rviz.launch.py
         - trial:
           - cd ../..
-          - ros2 run unity_sim trial_info_listener.py --ros-args -p method:=mbsn_5
+          - ros2 run unity_sim trial_info_listener.py --ros-args -p method:=hbsn
