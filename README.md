@@ -23,7 +23,7 @@ The experiments were conducted in Ubuntu 22.04 with ROS Humble and Unity 2022.3.
 ```
 .                   # ~/social_benchmark_robotic_navigation
 ├── hbsn            # Python module contains code for heuristic-based social navigation
-├── ros2_ws         # ROS2 Workspace, contains TCP_Connector ROS2-Unity and MBSN
+├── ros2_ws         # ROS2 Workspace, contains TCP_Connector ROS2-Unity and HBSN
 ├── tmux            # Tmux files to  launch different baseline on our unity simulator
 └── sbrn            # Unity Project
 
@@ -45,3 +45,7 @@ For example, to use HBSN method :
 cd ~/benchmark_social_navigation/tmux/HBSN
 tmuxinator
 ```
+
+# Results
+
+All data, human and robot positions and all metrics will be stored in a ```./analysis``` folder.
