@@ -1,0 +1,32 @@
+Metadata-Version: 2.2
+Name: HBSN
+Version: 0.1.0
+Summary: Heuristic-Based Social Navigation
+Author-email: Adam Gouguet <adam.gouguet@imt-nord-europe.fr>
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.0
+Description-Content-Type: text/markdown
+Requires-Dist: pyyaml
+Requires-Dist: opencv-python
+Requires-Dist: matplotlib
+Requires-Dist: shapely
+Requires-Dist: pygame
+Requires-Dist: torch
+Requires-Dist: scipy
+Requires-Dist: scikit-image
+Requires-Dist: sortedcontainers
+Requires-Dist: flatdict
+Requires-Dist: importlib_resources
+
+
+Install conda : https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html
+
+conda create --name hbsn python=3.10.12
+
+conda activate hbsn
+
+pip install -e .
+
+python src/hbsn/main.py

@@ -1,0 +1,27 @@
+[build-system]
+requires = [
+    "setuptools>=60",
+    "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "HBSN"
+version = "0.1.0"
+authors = [
+  { name="Adam Gouguet", email="adam.gouguet@imt-nord-europe.fr" },
+]
+description = "Heuristic-Based Social Navigation"
+dependencies = ["pyyaml", "opencv-python", "matplotlib", "shapely", "pygame", "torch", "scipy", "scikit-image", "sortedcontainers", "flatdict", "importlib_resources"]
+readme = "README.md"
+requires-python = ">=3.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+'*' = ['*', '*.yaml']

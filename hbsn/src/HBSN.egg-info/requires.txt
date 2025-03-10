@@ -1,0 +1,11 @@
+pyyaml
+opencv-python
+matplotlib
+shapely
+pygame
+torch
+scipy
+scikit-image
+sortedcontainers
+flatdict
+importlib_resources
