@@ -14,7 +14,7 @@ Here is the list of different baselines used for the comparison:
   - [SARL*](https://github.com/LeeKeyu/sarl_star)
   - [DRL_VO](https://github.com/TempleRAIL/drl_vo_nav)
   - [BRNE](https://github.com/MurpheyLab/brne)
-  - Ours
+  - Ours, Heuristic-Based Social Navigation (HBSN)
 
 # Installation
 
@@ -31,17 +31,15 @@ The experiments were conducted in Ubuntu 22.04 with ROS Humble and Unity 2022.3.
 
 ## Dependencies
 
- . We recommend installing ```Tmux``` which is a terminal multiplexer and ```Tmuxinator``` which is a tool that allows you to easily manage tmux sessions using yaml files, we have provided different yaml files for each baseline in the folder ```~/social_benchmark_robotic_navigation/tmux/<navigation method>```. 
-
- . We used Docker to containerize all ROS1 baselines and used ros_bridge to be able to use our benchmark in ROS2. You can find the docker images [here](https://hub.docker.com/repository/docker/agouguet/benchmark-social-navigation/general).
-
- . For our method, it is enough to use the ros2 workspace present in this repository and for DWB to use nav2 from ROS2.
+ * We recommend installing ```Tmux``` which is a terminal multiplexer and ```Tmuxinator``` which is a tool that allows you to easily manage tmux sessions using yaml files, we have provided different yaml files for each baseline in the folder ```~/social_benchmark_robotic_navigation/tmux/<navigation method>```. 
+ * We used Docker to containerize all ROS1 baselines and used ros_bridge to be able to use our benchmark in ROS2. You can find the docker images [here](https://hub.docker.com/repository/docker/agouguet/benchmark-social-navigation/general).
+ * For our method, it is enough to use the ros2 workspace present in this repository and for DWB to use nav2 from ROS2.
 
 ## Usage
 
-For example, to use MBSN method :
+For example, to use HBSN method :
 
 ```
-cd ~/benchmark_social_navigation/tmux/MBSN
+cd ~/benchmark_social_navigation/tmux/HBSN
 tmuxinator
 ```
