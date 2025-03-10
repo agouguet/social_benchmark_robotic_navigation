@@ -22,6 +22,7 @@ The experiments were conducted in Ubuntu 22.04 with ROS Humble and Unity 2022.3.
 
 ```
 .                   # ~/social_benchmark_robotic_navigation
+├── hbsn            # Python module contains code for heuristic-based social navigation
 ├── ros2_ws         # ROS2 Workspace, contains TCP_Connector ROS2-Unity and MBSN
 ├── tmux            # Tmux files to  launch different baseline on our unity simulator
 └── sbrn            # Unity Project
@@ -33,7 +34,8 @@ The experiments were conducted in Ubuntu 22.04 with ROS Humble and Unity 2022.3.
 
  * We recommend installing ```Tmux``` which is a terminal multiplexer and ```Tmuxinator``` which is a tool that allows you to easily manage tmux sessions using yaml files, we have provided different yaml files for each baseline in the folder ```~/social_benchmark_robotic_navigation/tmux/<navigation method>```. 
  * We used Docker to containerize all ROS1 baselines and used ros_bridge to be able to use our benchmark in ROS2. You can find the docker images [here](https://hub.docker.com/repository/docker/agouguet/benchmark-social-navigation/general).
- * For our method, it is enough to use the ros2 workspace present in this repository and for DWB to use nav2 from ROS2.
+ * For our method, it is enough to use the ros2 workspace present in this repository and build python module, in ```hbsn``` : ```pip install .```
+ * For DWB use nav2 from ROS2.
 
 ## Usage
 
