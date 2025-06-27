@@ -14,6 +14,7 @@ Here is the list of different baselines used for the comparison:
   - [SARL*](https://github.com/LeeKeyu/sarl_star)
   - [DRL_VO](https://github.com/TempleRAIL/drl_vo_nav)
   - [BRNE](https://github.com/MurpheyLab/brne)
+  - [MBS-EBM](https://github.com/Woodenonez/DyObAv-MPCnEBM-Warehouse-ROS2/tree/main)
   - Ours, Heuristic-Based Social Navigation (HBSN)
 
 ## Installation
