@@ -112,7 +112,7 @@ namespace SEAN.Scenario.Agents
                         }
                         // agentPosition.Add(agentPosition[0]);
 
-                        float desiredSpeed = agentPositions.GetComponent<PositionAgent>().desiredSpeed;
+                        float desiredSpeed = agentPositions.GetComponent<PositionAgent>().newDesiredSpeed();
                         float maxSpeed = agentPositions.GetComponent<PositionAgent>().maxSpeed;
                         float perception = agentPositions.GetComponent<PositionAgent>().perception;
                         bool staticAgent = agentPositions.GetComponent<PositionAgent>().staticAgent;

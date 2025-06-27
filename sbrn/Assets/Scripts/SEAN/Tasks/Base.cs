@@ -40,7 +40,7 @@ namespace SEAN.Tasks
         public string FrameID = "map";
 
         protected SEAN sean;
-        private static ROSConnection ros;
+        protected static ROSConnection ros;
 
         private float debounceTime = 0f;
         public float debounceTimeoutSec = 5f;
@@ -180,6 +180,7 @@ namespace SEAN.Tasks
         {
             ros = ROSConnection.GetOrCreateInstance();
             ros.RegisterPublisher<RosMessageTypes.Geometry.PoseStampedMsg>(Topic);
+            ros.RegisterPublisher<RosMessageTypes.Std.StringMsg>("new_scenario");
             sean = SEAN.instance;
             initStartAndGoal();
             number = 0;

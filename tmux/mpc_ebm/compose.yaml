@@ -1,0 +1,21 @@
+version: "3.8"
+
+networks:
+  ros:
+    driver: bridge
+
+services:
+  # MPC-EBM
+  mpc_ebm:
+    image: agouguet/benchmark-social-navigation:mpc_ebm
+    entrypoint: ''
+    command: bash -c "sleep 1 && source /opt/ros/humble/setup.bash && source /root/mpc-ebm_ws/install/setup.bash && cd /root/mpc-ebm_ws/ && stdbuf -o L ros2 launch sbrn_demo demo_warehouse_single_robot_gazebo_mpc_mmp.launch.py "
+    networks:
+      - ros
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

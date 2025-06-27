@@ -22,7 +22,7 @@ namespace SEAN.Tasks
             Publish(interactiveGoal);
         }
 
-        
+
 
         private void InitializeTaskPositions()
         {
@@ -40,6 +40,9 @@ namespace SEAN.Tasks
             playerGoal.transform.rotation = pointB.transform.rotation;
 
             Publish(interactiveGoal);
+            RosMessageTypes.Std.StringMsg msg = new RosMessageTypes.Std.StringMsg();
+            msg.data = "true";
+            ros.Publish("new_scenario", msg);
         }
 
         protected override bool NewTask()
