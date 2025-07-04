@@ -1,0 +1,6 @@
+# Request (vide)
+---
+
+# Response
+bool success        # Indique si la demande a réussi ou non
+string message      # Message d'information ou d'erreur

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(simulation_msgs)
+project(cnn_msgs)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -27,13 +27,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/PersonEntry.msg"
-  "msg/PersonEntryArray.msg"
-  "msg/RealDepthImage.msg"
-  "msg/SceneInfo.msg"
-  "msg/TrialStart.msg"
-  "srv/Trigger.srv"
-  "srv/PausePlay.srv"
+  "msg/CNNdata.msg"
   DEPENDENCIES std_msgs geometry_msgs
 )
 
