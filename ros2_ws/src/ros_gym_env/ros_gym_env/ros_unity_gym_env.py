@@ -4,6 +4,7 @@ import time, math
 import random
 import signal
 import atexit
+import threading
 import rclpy
 from rclpy.node import Node
 import gymnasium as gym
@@ -17,6 +18,7 @@ from cnn_msgs.msg import CNNdata
 from threading import Event
 from tf_transformations import euler_from_quaternion
 from sklearn.preprocessing import MaxAbsScaler
+from ros_gym_env.cnn_data_pub import CnnDataNode
 
 
 def wait_for_message(node: Node, topic_name: str, msg_type, timeout: float = None):
@@ -44,20 +46,22 @@ def wait_for_message(node: Node, topic_name: str, msg_type, timeout: float = Non
     return received_msg[0]
 
 class RosUnityEnv(gym.Env):
-    def __init__(self, launch_ros_tcp, max_iteration=1024):
+    def __init__(self, env_id, max_iteration=1024):
         super().__init__()
 
-        self.max_iteration = max_iteration #4096 #800 # 34 pedestrians: 3000: 5m; no pedestrians: 800: 3m
+        self.env_id = env_id
+        self.prefix = "/env_" + str(self.env_id)
+        self.max_iteration = max_iteration
 
         # robot parameters:
         self.ROBOT_RADIUS = 0.35
         self.GOAL_RADIUS = 0.3 #0.3
         self.DIST_NUM = 10
-        self.min_linear_velocity = 0.0
+        self.min_linear_velocity = -1.0
         self.max_linear_velocity = 1.0
 
-        self.min_angular_velocity = -2.0
-        self.max_angular_velocity = 2.0
+        self.min_angular_velocity = -3.0
+        self.max_angular_velocity = 3.0
 
 
          # bumper:
@@ -107,17 +111,17 @@ class RosUnityEnv(gym.Env):
         # self.goal = np.zeros(2, dtype=np.float32)
 
         # === ROS topics ===
-        self.node.create_subscription(Odometry, '/robot_odom', self._robot_vel_callback, 1)
-        self.node.create_subscription(PoseStamped, "/robot_pose", self._robot_pose_callback, 1)
-        self.node.create_subscription(CNNdata, "/cnn_data", self._cnn_data_callback, 1)
-        self.node.create_subscription(PoseStamped, '/global_goal', self._final_goal_callback, 1)
-        self.cmd_vel_publisher = self.node.create_publisher(Twist, '/cmd_vel', 10)
+        self.node.create_subscription(Odometry, self.prefix + '/robot_odom', self._robot_vel_callback, 1)
+        self.node.create_subscription(PoseStamped, self.prefix + "/robot_pose", self._robot_pose_callback, 1)
+        self.node.create_subscription(CNNdata, self.prefix + "/cnn_data", self._cnn_data_callback, 1)
+        self.node.create_subscription(PoseStamped, self.prefix + '/global_goal', self._final_goal_callback, 1)
+        self.cmd_vel_publisher = self.node.create_publisher(Twist, self.prefix + '/cmd_vel', 10)
 
         self.obs = None
         self.done = False
 
         # === Services ===
-        self.reset_client = self.node.create_client(Trigger, '/unity/reset')
+        self.reset_client = self.node.create_client(Trigger, self.prefix + '/unity/reset')
         while not self.reset_client.wait_for_service(timeout_sec=1.0):
             self.node.get_logger().info('Attente du service de reset...')
 
@@ -159,7 +163,7 @@ class RosUnityEnv(gym.Env):
         #self._publish_goal(3, 3, 0)
 
         time.sleep(1)    
-        self._check_all_systems_ready()
+        # self._check_all_systems_ready()
 
         # initalize info:
         self.init_pose = self.curr_pose # inital_pose.pose.pose

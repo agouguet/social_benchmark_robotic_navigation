@@ -11,8 +11,8 @@ import numpy as np
 NUM_TP = 10
 
 class CnnDataNode(Node):
-    def __init__(self):
-        super().__init__('cnn_data_node')
+    def __init__(self, prefix = ""):
+        super().__init__('cnn_data_node_'+prefix)
 
         # Buffers internes
         self.ped_pos_map = None
@@ -26,12 +26,12 @@ class CnnDataNode(Node):
 
         # Subscriptions
         # self.create_subscription(TrackedPersons, '/track_ped', self.ped_callback, 10)
-        self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.create_subscription(Point, '/local_goal', self.goal_callback, 10)
-        self.create_subscription(Twist, '/mobile_base/commands/velocity', self.vel_callback, 10)
+        self.create_subscription(LaserScan, prefix + '/scan', self.scan_callback, 10)
+        self.create_subscription(Point, prefix + '/local_goal', self.goal_callback, 10)
+        self.create_subscription(Twist, prefix + '/cmd_vel', self.vel_callback, 10)
 
         # Publisher
-        self.pub = self.create_publisher(CNNdata, '/cnn_data', 1)
+        self.pub = self.create_publisher(CNNdata, prefix + '/cnn_data', 1)
 
         # Timer à 20 Hz
         timer_period = 1.0 / 20.0
@@ -106,5 +106,28 @@ def main(args=None):
     node.destroy_node()
     rclpy.shutdown()
 
+def multiple_env():
+    rclpy.init()
+
+    num_envs = 8
+    nodes = []
+
+    for i in range(num_envs):
+        node = CnnDataNode("env_" + str(i))
+        nodes.append(node)
+
+    # Lancer tous les nœuds dans un MultiThreadedExecutor
+    from rclpy.executors import MultiThreadedExecutor
+    executor = MultiThreadedExecutor()
+    for node in nodes:
+        executor.add_node(node)
+
+    executor.spin()
+
+    for node in nodes:
+        node.destroy_node()
+    rclpy.shutdown()
+
 if __name__ == '__main__':
-    main()
+    multiple_env()
+    # main()

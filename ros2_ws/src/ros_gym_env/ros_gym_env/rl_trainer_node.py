@@ -1,71 +1,43 @@
 #!/usr/bin/env python3
 import signal
 import numpy as np
-import os
+import os, time
 from tqdm import tqdm
 import rclpy
 from rclpy.node import Node
 from stable_baselines3 import PPO
 from ros_gym_env.ros_unity_gym_env import RosUnityEnv
+from ros_gym_env.simple_env import RosUnitySimpleEnv
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3 import PPO
 from stable_baselines3.common.results_plotter import load_results, ts2xy
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from ros_gym_env.custom_cnn import *
+import torch
+import gymnasium as gym
+from stable_baselines3.common.vec_env import VecEnvWrapper
+from stable_baselines3.common.callbacks import EvalCallback
 
+torch.cuda.empty_cache() 
 
-class SaveOnBestTrainingRewardCallback(BaseCallback):
-    """
-    Callback for saving a model (the check is done every ``check_freq`` steps)
-    based on the training reward (in practice, we recommend using ``EvalCallback``).
+class VecEnvDelayWrapper(VecEnvWrapper):
+    def __init__(self, venv, delay_sec=0.1):
+        super().__init__(venv)
+        self.delay_sec = delay_sec
 
-    :param check_freq: (int)
-    :param log_dir: (str) Path to the folder where the model will be saved.
-      It must contains the file created by the ``Monitor`` wrapper.
-    :param verbose: (int)
-    """
-    def __init__(self, node, check_freq: int, log_dir: str, verbose=1):
-        super(SaveOnBestTrainingRewardCallback, self).__init__(verbose)
-        self.check_freq = check_freq
-        self.log_dir = log_dir
-        self.save_path = os.path.join(log_dir, 'best_model')
-        self.best_mean_reward = -np.inf
-        self.node = node
+    def step_async(self, actions):
+        return self.venv.step_async(actions)
 
-    def _init_callback(self) -> None:
-        # Create folder if needed
-        if self.save_path is not None:
-          os.makedirs(self.save_path, exist_ok=True)
+    def step_wait(self):
+        obs, rewards, dones, infos = self.venv.step_wait()
+        time.sleep(self.delay_sec)  # <- Pause ici, après que tous les envs aient steppé
+        return obs, rewards, dones, infos
 
-    def _on_step(self) -> bool:
-        if self.n_calls % self.check_freq == 0:
-
-          # Retrieve training reward
-          x, y = ts2xy(load_results(self.log_dir), 'timesteps')
-          if len(x) > 0:
-              # Mean training reward over the last 100 episodes
-              mean_reward = np.mean(y[-100:])
-              if self.verbose > 0:
-                self.node.get_logger().info("Num timesteps: {}".format(self.num_timesteps))
-                self.node.get_logger().info("Best mean reward: {:.2f} - Last mean reward per episode: {:.2f}".format(self.best_mean_reward, mean_reward))
-
-              # New best model, you could save the agent here
-              if mean_reward > self.best_mean_reward:
-                  self.best_mean_reward = mean_reward
-                  # Example for saving best model
-                  if self.verbose > 0:
-                    self.node.get_logger().info("Saving new best model to {}".format(self.save_path))
-                  self.model.save(self.save_path)
-                  
-        # save model every 100000 timesteps:
-        if self.n_calls % (50000) == 0:
-          # Retrieve training reward
-          path = self.save_path + '_model' + str(self.n_calls)
-          self.model.save(path)
-	  
-        return True
+    def reset(self):
+        return self.venv.reset()
 
 class ROSLoggingCallback(BaseCallback):
     def __init__(self, ros_node, print_freq: int = 1000, verbose=0):
@@ -89,10 +61,21 @@ class RLTrainerNode(Node):
     def __init__(self):
         super().__init__('rl_trainer_node')
         max_iteration = 1024
-        self.env = RosUnityEnv(launch_ros_tcp=True, max_iteration=max_iteration)
-        self.log_dir = "."
-        
+        self.log_dir = "./log_drl/"
 
+        num_envs = 6
+        env_ids = [0, 1, 2, 3, 4, 5]  # paramètres spécifiques pour chaque env
+        env_ids = [0, 1, 2, 3]
+
+        env_fns = [self.make_env(i) for i in env_ids]
+        # self.env = SubprocVecEnv(env_fns)  # ou DummyVectorEnv si debug/local
+        self.env = DummyVecEnv(env_fns)
+        self.env = VecEnvDelayWrapper(self.env, delay_sec=0.04)
+
+        # self.env = RosUnitySimpleEnv(launch_ros_tcp=True, max_iteration=max_iteration)
+        # self.env = RosUnityEnv(launch_ros_tcp=True, max_iteration=max_iteration)
+        
+        
         # policy parameters:
         policy_kwargs = dict(
             features_extractor_class=CustomCNN,
@@ -100,19 +83,32 @@ class RLTrainerNode(Node):
             net_arch=[dict(pi=[256], vf=[128])]
         )
 
-        self.model = PPO("CnnPolicy", self.env, policy_kwargs=policy_kwargs, learning_rate=1e-3, verbose=2, tensorboard_log=self.log_dir, n_steps=max_iteration, n_epochs=10, batch_size=128)
-        # self.model = PPO("MlpPolicy", self.env, verbose=1, n_steps=100000, tensorboard_log="./ppo_robot_tensorboard/")
+        self.model = PPO("CnnPolicy", self.env, policy_kwargs=policy_kwargs, learning_rate=1e-3, verbose=2, tensorboard_log=self.log_dir, n_steps=max_iteration, n_epochs=10, batch_size=32)
+        # self.model = PPO("MlpPolicy", self.env, verbose=1, n_steps=100000, tensorboard_log=self.log_dir)
         
-        # self.env = Monitor(self.env, self.log_dir)
+    def make_env(self, env_id):
+        def _init():
+            # env = RosUnitySimpleEnv(env_id)
+            env = RosUnityEnv(env_id)
+            env = Monitor(env, self.log_dir+str(env_id)+"/")
+            return env
+        return _init
 
     def start_training(self):
         self.get_logger().info("Start training ...")
         total_timesteps = 2000000
         print_freq = 10
 
+        eval_callback = EvalCallback(self.env,
+                             best_model_save_path=self.log_dir,
+                             log_path=self.log_dir,
+                             eval_freq=10_000,
+                             deterministic=True,
+                             render=False)
+
         callbacks = [
-            SaveOnBestTrainingRewardCallback(self, check_freq=2500, log_dir=self.log_dir),
             ROSLoggingCallback(self, print_freq=print_freq),
+            eval_callback
         ]
         self.model.learn(total_timesteps=2000000, log_interval=20, tb_log_name='drl_vo_policy', callback=CallbackList(callbacks), reset_num_timesteps=True)
         self.model.save("drl_vo_model")
