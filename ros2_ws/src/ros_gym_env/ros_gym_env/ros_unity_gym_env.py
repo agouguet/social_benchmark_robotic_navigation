@@ -57,11 +57,11 @@ class RosUnityEnv(gym.Env):
         self.ROBOT_RADIUS = 0.35
         self.GOAL_RADIUS = 0.3 #0.3
         self.DIST_NUM = 10
-        self.min_linear_velocity = -1.0
-        self.max_linear_velocity = 1.0
+        self.min_linear_velocity = 0.0
+        self.max_linear_velocity = 0.5
 
-        self.min_angular_velocity = -3.0
-        self.max_angular_velocity = 3.0
+        self.min_angular_velocity = -2.0
+        self.max_angular_velocity = 2.0
 
 
          # bumper:
@@ -69,15 +69,15 @@ class RosUnityEnv(gym.Env):
         self.bump_num = 0
 
         # reward:
-        self.dist_to_goal_reg = 0.0 #np.zeros(self.DIST_NUM)
+        self.dist_to_goal_reg = np.zeros(self.DIST_NUM)
         self.num_iterations = 0
 
         self.max_steps = 10  # par ex, max steps par épisode
         self.current_step = 0
 
         # Initialisation Node
-        self.node = Node("ros_unity_env")
-        self.wait_for_message_node = Node("wait_for_message_tester")
+        self.node = Node("ros_unity_env_" + str(self.env_id))
+        # self.wait_for_message_node = Node("wait_for_message_tester")
 
         # === Spaces ===
         self.scan_size = 6400  # ajustable
@@ -150,26 +150,34 @@ class RosUnityEnv(gym.Env):
 
         #self._reset = True
         # reset simulation to orignal:
+        t = time.time()
         if(self._reset): 
             self._reset = False
             req = Trigger.Request()
             future = self.reset_client.call_async(req)
             rclpy.spin_until_future_complete(self.node, future)
-                
-        # publish inital goal:
-        # [goal_x, goal_y, goal_yaw] = self._publish_random_goal()
 
-        #[goal_x, goal_y, goal_yaw] = [3, 3, 0]
-        #self._publish_goal(3, 3, 0)
+        # self.node.get_logger().fatal("Time 1 {}".format(time.time() - t))
 
-        time.sleep(1)    
-        # self._check_all_systems_ready()
+            
 
         # initalize info:
-        self.init_pose = self.curr_pose # inital_pose.pose.pose
-        self.curr_pose = self.curr_pose # inital_pose.pose.pose
-        self.ts_cnt = 0 
-        self.node.get_logger().warning("Robot was initiated as {}".format(self.init_pose), once=True)
+        self.cnn_data = None
+        self.ped_pos = []
+        self.scan = []
+        self.goal = []
+        self.mht_peds = []
+
+        # info, initial position and goal position
+        self.init_pose = Pose()
+        self.curr_pose = Pose()
+        self.curr_vel = Twist()
+        self.goal_position = None
+        self.info = {}
+
+        # self.init_pose = self.curr_pose # inital_pose.pose.pose
+        # self.curr_pose = self.curr_pose # inital_pose.pose.pose
+        # self.node.get_logger().warning("Robot was initiated as {}".format(self.init_pose), once=True)
 
         # reset pose valid flag:
         self.pos_valid_flag = True
@@ -179,76 +187,22 @@ class RosUnityEnv(gym.Env):
         # reset the number of iterations:
         self.num_iterations = 0
         # reset distance to goal register:
-        self.dist_to_goal_reg = 0.0 #np.zeros(self.DIST_NUM)
+        self.dist_to_goal_reg = np.zeros(self.DIST_NUM)
         # reset episode done flag:
         self._episode_done = False
+
+        while self.cnn_data == None:
+            rclpy.spin_once(self.node, timeout_sec=1.0)
+        # self.node.get_logger().fatal("Time 2 {}".format(time.time() - t))
+        while self.goal_position == None:
+            rclpy.spin_once(self.node, timeout_sec=1.0)
+        # self.node.get_logger().fatal("Time 3 {}".format(time.time() - t))
+        # time.sleep(2)
 
         # Give the system a little time to finish initialization
         self.node.get_logger().warning("Finish initialize robot.", once=True)
         
         return self.init_pose, self.goal_position
-    
-    def _check_all_systems_ready(self):
-        """
-        Checks that all the subscribers, publishers and other simulation systems are
-        operational.
-        """
-        self._check_all_subscribers_ready()
-        # self._check_all_publishers_ready()
-        return True
-
-    # check subscribers ready:
-    def _check_all_subscribers_ready(self):
-        self.node.get_logger().warning("START TO CHECK ALL SUBSCRIBERS READY", once=True)
-        # self._check_subscriber_ready("/map", OccupancyGrid)
-        # self._check_subscriber_ready("/cnn_data", CNN_data)
-        self._check_subscriber_ready("/global_goal", PoseStamped)
-        self._check_subscriber_ready("/scan", LaserScan)
-        self._check_subscriber_ready("/robot_pose", PoseStamped)
-        self.node.get_logger().warning("ALL SUBSCRIBERS READY", once=True)
-
-    def _check_subscriber_ready(self, name, type, timeout=5.0):
-        """
-        Waits for a sensor topic to get ready for connection
-        """
-        var = None
-        # self.node.get_logger().warning("Waiting for {} to be READY...".format(name)) 
-        while var is None and rclpy.ok():
-            try:
-                var = wait_for_message(self.node, name, type, timeout)
-                # self.node.get_logger().warning("Current {} READY=>".format(name))     
-            except:
-                self.node.get_logger().warning("Sensor topic {} is not available. Waiting...".format(name))
-        return var
-    
-    # check publishers ready:
-    def _check_all_publishers_ready(self):
-        self.node.get_logger().warning("START TO CHECK ALL PUBLISHERS READY", once=True)
-        self._check_publisher_ready(self._cmd_vel_pub.name, self._cmd_vel_pub)
-        self._check_publisher_ready(self._initial_goal_pub.name, self._initial_goal_pub)
-        self._check_publisher_ready(self._initial_pose_pub.name, self._initial_pose_pub)
-        self.node.get_logger().warning("ALL PUBLISHERS READY", once=True)
-
-    def _check_publisher_ready(self, name, obj, timeout=5.0):
-        """
-        Waits for a publisher to get response
-        """
-        # self.node.get_logger().warning("Waiting for '%s' to get response...", name) 
-        # start_time = rospy.Time.now()
-        # while obj.get_num_connections() == 0 and not rospy.is_shutdown():
-        #         self.node.get_logger().error('No subscriber found for publisher %s. Exiting', name)
-        # self.node.get_logger().warning("'%s' Publisher Connected", name)
-
-    # def _check_service_ready(self, name, timeout=5.0):
-    #     """
-    #     Waits for a service to get ready
-    #     """
-    #     self.node.get_logger().warning("Waiting for '%s' to be READY...", name)
-    #     try:
-    #         rospy.wait_for_service(name, timeout)
-    #         self.node.get_logger().warning("Current '%s' READY=>", name)
-    #     except (rospy.ServiceException, rospy.ROSException):
-    #         self.node.get_logger().error("Service '%s' unavailable.", name)
         
     def _robot_vel_callback(self, robot_vel_msg):
         self.curr_vel = robot_vel_msg.twist.twist
@@ -259,7 +213,6 @@ class RosUnityEnv(gym.Env):
     def _cnn_data_callback(self, cnn_data_msg):
         self.cnn_data = cnn_data_msg
         
-
     def _final_goal_callback(self, final_goal_msg):
         self.goal_position = final_goal_msg.pose.position
 
@@ -272,24 +225,39 @@ class RosUnityEnv(gym.Env):
         self.cmd_vel_publisher.publish(cmd_vel)
 
     def step(self, action):
+        t = time.time()
         self.current_step += 1
         steps_left = self.max_steps - self.current_step
-        # self.node.get_logger().warning("Start step")
+        # if (self.env_id == 0):
+        #     self.node.get_logger().fatal("    01 Start {}".format(time.time() - t))
+        #     t = time.time()
 
-        # self.node.get_logger().warning("Send action")
+        # if (self.env_id == 0):
+        #     self.node.get_logger().fatal("    02 Send Action {}".format(time.time() - t))
+        #     t = time.time()
         self.send_action(action)
 
+        # if (self.env_id == 0):
+        #     self.node.get_logger().fatal("    03 Spin {}".format(time.time() - t))
+        #     t = time.time()
         rclpy.spin_once(self.node, timeout_sec=0.05)
 
-        # self.node.get_logger().warning("Get observation")
+        # if (self.env_id == 0):
+        #     self.node.get_logger().fatal("    04 Get Obs {}".format(time.time() - t))
+        #     t = time.time()
         obs = self._get_observation()
 
-        # Calcul reward / done
+        # if (self.env_id == 0):
+        #     self.node.get_logger().fatal("    05 Compute Reward {}".format(time.time() - t))
+        #     t = time.time()
         reward = self._compute_reward()
 
-        # self.node.get_logger().warning("Is Done ?")
         done = self._is_done(reward)
         # done = True
+
+        # if (self.env_id == 0):
+        #     self.node.get_logger().fatal("    06 Is Done ? {} {}".format(done, time.time() - t))
+        #     t = time.time()
 
         truncated = False
 
@@ -312,7 +280,15 @@ class RosUnityEnv(gym.Env):
 
         # 1) Goal reached?
         # distance to goal:
-        dist_to_goal = np.linalg.norm(self.global_goal_from_local())
+        dist_to_goal = np.linalg.norm(
+            np.array([
+            self.curr_pose.position.x - self.goal_position.x,
+            self.curr_pose.position.y - self.goal_position.y,
+            self.curr_pose.position.z - self.goal_position.z
+            ])
+        )
+
+        # self.node.get_logger().warning("Dist goal {}    {} ".format(dist_to_goal, self.goal_position))
 
         if(dist_to_goal <= self.GOAL_RADIUS):
             # reset the robot velocity to 0:
@@ -364,23 +340,29 @@ class RosUnityEnv(gym.Env):
         # MaxAbsScaler:
         v_min = -2
         v_max = 2
-        self.ped_pos = np.array(self.ped_pos, dtype=np.float32)
+        self.ped_pos = np.asarray(self.ped_pos, dtype=np.float32)
         self.ped_pos = 2 * (self.ped_pos - v_min) / (v_max - v_min) + (-1)
 
         # scan map:
         # MaxAbsScaler:
         temp = np.array(self.scan, dtype=np.float32)
-        scan_avg = np.zeros((20,80))
-        for n in range(10):
-            scan_tmp = temp[n*720:(n+1)*720]
-            for i in range(80):
-                scan_avg[2*n, i] = np.min(scan_tmp[i*9:(i+1)*9])
-                scan_avg[2*n+1, i] = np.mean(scan_tmp[i*9:(i+1)*9])
-        
+        # scan_avg = np.zeros((20,80))
+        # for n in range(10):
+        #     scan_tmp = temp[n*720:(n+1)*720]
+        #     for i in range(80):
+        #         scan_avg[2*n, i] = np.min(scan_tmp[i*9:(i+1)*9])
+        #         scan_avg[2*n+1, i] = np.mean(scan_tmp[i*9:(i+1)*9])
+        temp = temp.reshape(10, 720, 1)
+        temp = temp.reshape(10, 80, 9)
+        scan_min = np.min(temp, axis=2)
+        scan_mean = np.mean(temp, axis=2)
+        scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(20, 80)
+
 
         scan_avg = scan_avg.reshape(1600)
-        scan_avg_map = np.matlib.repmat(scan_avg,1,4)
-        self.scan = scan_avg_map.reshape(6400)
+        # scan_avg_map = np.matlib.repmat(scan_avg,1,4)
+        # self.scan = scan_avg_map.reshape(6400)
+        self.scan = np.tile(scan_avg, 4)
         s_min = 0
         s_max = 30
         self.scan = 2 * (self.scan - s_min) / (s_max - s_min) + (-1)
@@ -464,7 +446,7 @@ class RosUnityEnv(gym.Env):
         """
         # reward parameters:
         r_arrival = 20 #15
-        r_waypoint = 3.2 #2.5 #1.6 #2 #3 #1.6 #6 #2.5 #2.5
+        r_waypoint = 5.0 #3.2 #2.5 #1.6 #2 #3 #1.6 #6 #2.5 #2.5
         r_collision = -20 #-15
         r_scan = -0.2 #-0.15 #-0.3
         r_angle = 0.6 #0.5 #1 #0.8 #1 #0.5
@@ -476,13 +458,11 @@ class RosUnityEnv(gym.Env):
         # reward parts:
         r_g = self._goal_reached_reward(r_arrival, r_waypoint)
         r_c = self._obstacle_collision_punish(self.cnn_data.scan[-720:], r_scan, r_collision)
-        # r_w = self._angular_velocity_punish(self.curr_vel.angular.z,  r_rotation, w_thresh)
+        r_w = self._angular_velocity_punish(self.curr_vel.angular.z,  r_rotation, w_thresh)
         r_t = self._theta_reward(self.goal, self.mht_peds, self.curr_vel.linear.x, r_angle, angle_thresh)
-        # reward = r_g + r_c
-        reward = r_g + r_c + r_t
-        # reward = r_g + r_c + r_t + r_w #+ r_v # + r_p
-        #rospy.logwarn("Current Velocity: \ncurr_vel = {}".format(self.curr_vel.linear.x))
-        # rospy.logwarn("Compute reward done. \nreward = {}".format(reward))
+        reward = r_g + r_c + r_t + r_w #+ r_v # + r_p
+        self.node.get_logger().warning("Current Velocity: \ncurr_vel = {}".format(self.curr_vel.linear.x))
+        self.node.get_logger().warning("Compute reward done. \nreward = {}".format(reward))
         return reward
 
     def _goal_reached_reward(self, r_arrival, r_waypoint):
@@ -495,27 +475,28 @@ class RosUnityEnv(gym.Env):
         # distance to goal:
         dist_to_goal = np.linalg.norm(
             np.array([
-            self.curr_pose.position.x - self.goal_position.x,
-            self.curr_pose.position.y - self.goal_position.y,
-            self.curr_pose.position.z - self.goal_position.z
+                self.curr_pose.position.x - self.goal_position.x,
+                self.curr_pose.position.y - self.goal_position.y,
+                self.curr_pose.position.z - self.goal_position.z
             ])
         )
 
-        reward = 0.0
-        # reward calculation:
-        if(dist_to_goal <= self.GOAL_RADIUS):  # goal reached: t = T
-            reward = r_arrival
-        elif(self.num_iterations >= self.max_iteration):  # failed to the goal
-            reward = -r_arrival
-        else:   # on the way
-            if self.dist_to_goal_reg is not None:
-                reward += r_waypoint*(self.dist_to_goal_reg - dist_to_goal)
+        t_1 = self.num_iterations % 10
+        if(self.num_iterations == 0):
+            self.dist_to_goal_reg = np.ones(10)*dist_to_goal
 
-        # storage the robot pose at t-1:
-        self.dist_to_goal_reg = dist_to_goal
-    
-        # self.node.get_logger().warning("Goal reward: {}  {}  {}".format(self.dist_to_goal_reg, dist_to_goal, reward))
-        # self.node.get_logger().warning("{}".format(self.dist_to_goal_reg))
+        reward = 0.0
+
+        if(dist_to_goal <= self.GOAL_RADIUS):
+            reward = r_arrival
+        elif(self.num_iterations >= self.max_iteration):
+            reward = -r_arrival
+        else:
+            reward = r_waypoint*(self.dist_to_goal_reg[t_1] - dist_to_goal)
+
+        self.dist_to_goal_reg[t_1] = dist_to_goal
+
+        self.node.get_logger().warning("Goal reward: {}".format(reward))
         return reward
 
     def _obstacle_collision_punish(self, scan, r_scan, r_collision):
@@ -534,24 +515,24 @@ class RosUnityEnv(gym.Env):
         else:
             reward = 0.0
 
-        # rospy.logwarn("Obstacle collision reward: {}".format(reward))
+        self.node.get_logger().warning("Obstacle collision reward: {}".format(reward))
         return reward
 
-    # def _angular_velocity_punish(self, w_z,  r_rotation, w_thresh):
-    #     """
-    #     Returns negative reward if the robot turns.
-    #     :param w roatational speed of the robot
-    #     :param fac weight of reward punish for turning
-    #     :param thresh rotational speed > thresh will be punished
-    #     :return: returns reward for turning
-    #     """
-    #     if(abs(w_z) > w_thresh):
-    #         reward = abs(w_z) * r_rotation
-    #     else:
-    #         reward = 0.0
-
-    #     rospy.logwarn("Angular velocity punish reward: {}".format(reward))
-    #     return reward
+    def _angular_velocity_punish(self, w_z,  r_rotation, w_thresh):
+        """
+        Returns negative reward if the robot turns.
+        :param w roatational speed of the robot
+        :param fac weight of reward punish for turning
+        :param thresh rotational speed > thresh will be punished
+        :return: returns reward for turning
+        """
+        if(abs(w_z) > w_thresh):
+            reward = abs(w_z) * r_rotation
+        else:
+            reward = 0.0
+        
+        self.node.get_logger().warning("Angular velocity punish reward: {}      {}  {}  {}".format(reward, w_z, r_rotation, w_thresh))
+        return reward
 
     def _theta_reward(self, goal, mht_peds, v_x, r_angle, angle_thresh):
         """
@@ -603,6 +584,5 @@ class RosUnityEnv(gym.Env):
 
         reward = r_angle*(angle_thresh - abs(d_theta))
 
-        # rospy.logwarn("Theta reward: {}".format(reward))
+        self.node.get_logger().warning("Theta reward: {}".format(reward))
         return reward  
-

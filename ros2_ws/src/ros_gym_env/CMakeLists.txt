@@ -57,8 +57,15 @@ ament_export_dependencies(rosidl_default_runtime)
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
+install(DIRECTORY
+  launch
+  model
+  DESTINATION share/${PROJECT_NAME}/
+) 
+
 install(PROGRAMS
-  ros_gym_env/rl_trainer_node.py
+  scripts/rl_trainer_node.py
+  ros_gym_env/rl_inference_node.py
   ros_gym_env/rl_eval_node.py
   ros_gym_env/pause_play_client.py
   ros_gym_env/cnn_data_pub.py
