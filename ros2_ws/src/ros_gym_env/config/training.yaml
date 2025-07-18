@@ -1,0 +1,63 @@
+# Learning params
+learning:
+  total_timesteps: 50000000
+  n_steps: 512
+  learning_rate: 0.0003
+  num_envs: 10
+  speed_time: 1.0
+
+# Logging
+log:
+  log_dir: "./log_drl/"
+  log_interval: 1
+  throttle_duration: 0.5
+
+# PPO specific
+ppo:
+  clip_range: 0.2
+  batch_size: 512
+  n_epochs: 5
+  vf_coef: 0.5
+  ent_coef: 0.01
+  seed: 42
+  learning_rate_schedule: "linear"
+
+# Policy network
+policy:
+  # name: "scan"
+  name: "mlagent"
+  features_dim: 512
+  pi_layers: [512]
+  vf_layers: [128]
+  activation_fn: "tanh"  # or relu, elu, etc.
+
+# Environment observations
+env:
+  # name: "ros_gym_env"
+  # name: "simple_env"
+  name: "mlagent_env"
+  max_iteration: 512
+
+  obs:
+    goal: true
+    scan: true
+    scan_dim: 720
+    scan_history: 
+    humans: false
+
+  robot:
+    robot_radius: 0.35
+    goal_radius: 0.3
+    dist_goal_history_number: 10
+    min_linear_velocity: 0.0
+    max_linear_velocity: 0.5
+    min_angular_velocity: -2.0
+    max_angular_velocity: 2.0
+
+  ros:
+    robot_odom: "/robot_odom"
+    robot_pose: "/robot_pose"
+    cnn_data: "/cnn_data"
+    global_goal: "/global_goal"
+    cmd_vel: "/cmd_vel"
+    reset_service: "/unity/reset"

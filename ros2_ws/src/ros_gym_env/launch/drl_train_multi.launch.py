@@ -3,12 +3,26 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch.conditions import IfCondition
+from ament_index_python.packages import get_package_share_directory
+import os
 
 def launch_setup(context, *args, **kwargs):
     num_instances = int(LaunchConfiguration('num_instances').perform(context))
     speed_time = float(LaunchConfiguration('speed_time').perform(context))
     log_level = LaunchConfiguration('log_level')
     frequency = 20.0 * speed_time
+
+    config_training = os.path.join(
+        get_package_share_directory('ros_gym_env'),
+        'config',
+        'training.yaml'
+        )
+
+    config_global_planner = os.path.join(
+        get_package_share_directory('base_nav'),
+        'config',
+        'params.yaml'
+        )
 
     nodes = []
 
@@ -42,9 +56,29 @@ def launch_setup(context, *args, **kwargs):
             name='velocity_smoother',
             namespace=namespace,
             parameters=[{'frequency': frequency}],
-            arguments=['--ros-args', '--log-level', log_level],
+            arguments=['--ros-args', '--log-level', "fatal"], #log_level],
             output='screen'
         ))
+
+        # nodes.append(Node(
+        #     package = 'base_nav',
+        #     name = 'global_planner',
+        #     executable = 'jps.py',
+        #     namespace=namespace,
+        #     parameters = [config_global_planner, {'prefix': namespace}],
+        #     arguments=['--ros-args', '--log-level', log_level],
+        #     output='screen'
+        # ))
+
+        # nodes.append(Node(
+        #     package = 'ros_gym_env',
+        #     name = 'pure_pursuit',
+        #     executable = 'pure_pursuit.py',
+        #     namespace=namespace,
+        #     parameters = [{'prefix': namespace}],
+        #     arguments=['--ros-args', '--log-level', log_level],
+        #     output='screen'
+        # ))
 
     # Lancement du trainer
     nodes.append(Node(

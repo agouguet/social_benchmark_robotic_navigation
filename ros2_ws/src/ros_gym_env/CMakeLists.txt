@@ -60,15 +60,15 @@ ament_python_install_package(${PROJECT_NAME})
 install(DIRECTORY
   launch
   model
+  config
   DESTINATION share/${PROJECT_NAME}/
 ) 
 
 install(PROGRAMS
   scripts/rl_trainer_node.py
-  ros_gym_env/rl_inference_node.py
-  ros_gym_env/rl_eval_node.py
-  ros_gym_env/pause_play_client.py
-  ros_gym_env/cnn_data_pub.py
+  scripts/rl_inference_node.py
+  scripts/cnn_data_pub.py
+  scripts/pure_pursuit.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
