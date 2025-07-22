@@ -33,6 +33,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SceneInfo.msg"
   "msg/TrialStart.msg"
   "srv/Trigger.srv"
+  "srv/Reset.srv"
   "srv/PausePlay.srv"
   DEPENDENCIES std_msgs geometry_msgs
 )

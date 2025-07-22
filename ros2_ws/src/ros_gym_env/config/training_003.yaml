@@ -1,16 +1,11 @@
 # Learning params
 learning:
   total_timesteps: 50000000
-  n_steps: 1024
-  learning_rate: 0.0003
-  num_envs: 1
+  n_steps: 512
+  learning_rate: 0.001
+  num_envs: 10
   speed_time: 1.0
   save_model_frequency: 1000000
-  curriculum:
-    max_level: 3
-    window_size: 10
-    epsilon: 0.5
-    patience: 3
 
 # Logging
 log:
@@ -22,10 +17,10 @@ log:
 algo:
   name: "ppo"
   clip_range: 0.2
-  batch_size: 1024        # Plus stable si assez de RAM
-  n_epochs: 10            # Plus d'apprentissage si environnement stable
+  batch_size: 512        # Plus stable si assez de RAM
+  n_epochs: 5            # Plus d'apprentissage si environnement stable
   vf_coef: 0.5
-  ent_coef: 0.005         # Réduit un peu l'exploration
+  ent_coef: 0.01         # Réduit un peu l'exploration
   learning_rate_schedule: "linear"
   seed: 42
 
@@ -34,8 +29,8 @@ policy:
   # name: "scan"
   name: "mlagent"
   features_dim: 512
-  pi_layers: [512, 256]
-  vf_layers: [256, 128]
+  pi_layers: [512, 512, 512]
+  vf_layers: [512, 512, 512]
   activation_fn: "tanh"
 
 # Environment observations
@@ -43,10 +38,10 @@ env:
   # name: "ros_gym_env"
   # name: "simple_env"
   name: "mlagent_env"
-  max_iteration: 1536
+  max_iteration: 25000
   max_time: 90
   normalize_reward: False #True
-  normalize_observation: False
+  normalize_observation: True
 
   obs:
     goal: true

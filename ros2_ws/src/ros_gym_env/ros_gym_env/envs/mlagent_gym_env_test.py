@@ -19,7 +19,7 @@ from threading import Event
 from tf_transformations import euler_from_quaternion
 
 
-class MlAgentGymEnv(gym.Env):
+class MlAgentGymEnvTest(gym.Env):
     def __init__(self, env_id, config, env_id_display_log=None):
         super().__init__()
         self.config = config
@@ -427,13 +427,6 @@ class MlAgentGymEnv(gym.Env):
         :param k reward constant
         :return: returns reward colliding with obstacles
         """
-        # distance to goal:
-        # dist_to_goal = np.linalg.norm(
-        #     np.array([
-        #         self.final_goal.x,
-        #         self.final_goal.y
-        #     ])
-        # )
 
         dist_to_goal = np.linalg.norm(
             np.array([
