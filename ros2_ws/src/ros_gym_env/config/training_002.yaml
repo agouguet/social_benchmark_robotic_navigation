@@ -3,7 +3,7 @@ learning:
   total_timesteps: 50000000
   n_steps: 1024
   learning_rate: 0.0003
-  num_envs: 1
+  num_envs: 10
   speed_time: 1.0
   save_model_frequency: 1000000
   curriculum:
@@ -42,7 +42,8 @@ policy:
 env:
   # name: "ros_gym_env"
   # name: "simple_env"
-  name: "mlagent_env"
+  # name: "mlagent_env"
+  name: "test"
   max_iteration: 1536
   max_time: 90
   normalize_reward: False #True
@@ -51,8 +52,10 @@ env:
   obs:
     goal: true
     scan: true
-    scan_dim: 720
-    scan_history: 
+    scan_dim: 32 #720
+    scan_history: 10
+    scan_slice: 4 
+    scan_tile: 4 
     humans: false
 
   robot:

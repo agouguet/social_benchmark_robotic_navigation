@@ -58,9 +58,13 @@ class MlAgentGymEnv(gym.Env):
         self.start_time = self.get_time()
 
         # === Spaces ===
-        self.scan_size = 720 #self.config.env.obs.scan_dim
+        self.scan_size = self.config.env.obs.scan_dim
+        self.nb_slice = 1 #9
+        self.scan_history = 10
+        self.scan_obs_size = int(self.scan_size*self.scan_history)
+        # self.scan_obs_size = int((self.scan_size/self.nb_slice)**2)
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)                                 # Goal
-        self.observation_space = gym.spaces.Box(low=-math.inf, high=math.inf, shape=(6400 + 5,), dtype=np.float32)                      # Scan
+        self.observation_space = gym.spaces.Box(low=-math.inf, high=math.inf, shape=(self.scan_obs_size + 5,), dtype=np.float32)                      # Scan
 
         # observation space
         self.cnn_data = CNNdata()
@@ -326,16 +330,15 @@ class MlAgentGymEnv(gym.Env):
 
         # scan map:
         # MaxAbsScaler:
-        nb_slice = 9
-        size_slice = int(self.scan_size/nb_slice)
-        temp = np.array(self.scan, dtype=np.float32)
-        temp = temp.reshape(10, self.scan_size, 1)
-        temp = temp.reshape(10, size_slice, nb_slice)
-        scan_min = np.min(temp, axis=2)
-        scan_mean = np.mean(temp, axis=2)
-        scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(20, size_slice)
-        scan_avg = scan_avg.reshape(20*size_slice)
-        self.scan = np.tile(scan_avg, 4)
+        # size_slice = int(self.scan_size/self.nb_slice)
+        # temp = np.array(self.scan, dtype=np.float32)
+        # temp = temp.reshape(10, self.scan_size, 1)
+        # temp = temp.reshape(10, size_slice, self.nb_slice)
+        # scan_min = np.min(temp, axis=2)
+        # scan_mean = np.mean(temp, axis=2)
+        # scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(20, size_slice)
+        # scan_avg = scan_avg.reshape(20*size_slice)
+        # self.scan = np.tile(scan_avg, 4)
         s_min = 0
         s_max = 10
         self.scan = np.clip(self.scan, 0.0, 10.0)
@@ -456,7 +459,9 @@ class MlAgentGymEnv(gym.Env):
         # elif(self.start_time < self.get_time() - self.max_time):
             reward = -r_arrival
         else:
-            reward = r_waypoint*(self.dist_to_goal_reg[t_1] - dist_to_goal)
+            delta = self.dist_to_goal_reg[t_1] - dist_to_goal
+            reward = (r_waypoint*delta)
+            # reward = np.clip(reward, -r_waypoint, r_waypoint) # GPT didn't test
 
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
             self.node.get_logger().warning("Goal reward: {}  {}".format(dist_to_goal, reward), throttle_duration_sec=self.config.log.throttle_duration)

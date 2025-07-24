@@ -27,14 +27,15 @@ class Method():
 
     def get_policy(self, config):
         # PPO Policy
-        policy_kwargs = dict(
-            features_extractor_class=self.features_extractor_class,
-            features_extractor_kwargs=dict(features_dim=config.policy.features_dim, config=config),
-            net_arch=[dict(pi=config.policy.pi_layers, vf=config.policy.vf_layers)],
-            activation_fn=get_activation_fn(config.policy.activation_fn)
-        )
-
-        return self.policy, policy_kwargs
+        if self.features_extractor_class != None:
+            policy_kwargs = dict(
+                features_extractor_class=self.features_extractor_class,
+                features_extractor_kwargs=dict(features_dim=config.policy.features_dim, config=config),
+                net_arch=[dict(pi=config.policy.pi_layers, vf=config.policy.vf_layers)],
+                activation_fn=get_activation_fn(config.policy.activation_fn)
+            )
+            return self.policy, policy_kwargs
+        return self.policy, None
 
 
 method_factory = dict()

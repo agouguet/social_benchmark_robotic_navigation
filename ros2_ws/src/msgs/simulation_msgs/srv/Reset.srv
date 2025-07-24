@@ -4,4 +4,4 @@ int32 level
 
 # Response
 bool success        
-string message      
+float32 distance_start_goal      

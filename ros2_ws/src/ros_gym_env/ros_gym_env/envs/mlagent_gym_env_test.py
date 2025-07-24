@@ -48,6 +48,7 @@ class MlAgentGymEnvTest(gym.Env):
 
         # reward:
         self.dist_to_goal_reg = np.zeros(self.dist_goal_history_number)
+        self.init_distance = 0
         self.reset_dist_to_goal_reg = True
         self.num_iterations = 0
         
@@ -58,9 +59,14 @@ class MlAgentGymEnvTest(gym.Env):
         self.start_time = self.get_time()
 
         # === Spaces ===
-        self.scan_size = 720 #self.config.env.obs.scan_dim
+        self.scan_size = self.config.env.obs.scan_dim
+        self.nb_slice = self.config.env.obs.scan_slice
+        self.scan_history = self.config.env.obs.scan_history
+        self.scan_tile = self.config.env.obs.scan_tile
+        self.scan_obs_size = int((self.scan_size/self.nb_slice)*self.scan_history*2*self.scan_tile)
+
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)                                 # Goal
-        self.observation_space = gym.spaces.Box(low=-math.inf, high=math.inf, shape=(6400 + 5,), dtype=np.float32)                      # Scan
+        self.observation_space = gym.spaces.Box(low=-math.inf, high=math.inf, shape=(self.scan_obs_size + 5,), dtype=np.float32)                      # Scan
 
         # observation space
         self.cnn_data = CNNdata()
@@ -184,6 +190,7 @@ class MlAgentGymEnvTest(gym.Env):
             ])
         )
         self.dist_to_goal_reg = np.ones(10)*dist_to_goal
+        self.init_distance = dist_to_goal
 
 
         # Give the system a little time to finish initialization
@@ -326,16 +333,15 @@ class MlAgentGymEnvTest(gym.Env):
 
         # scan map:
         # MaxAbsScaler:
-        nb_slice = 9
-        size_slice = int(self.scan_size/nb_slice)
+        size_slice = int(self.scan_size/self.nb_slice)
         temp = np.array(self.scan, dtype=np.float32)
-        temp = temp.reshape(10, self.scan_size, 1)
-        temp = temp.reshape(10, size_slice, nb_slice)
+        temp = temp.reshape(self.scan_history, self.scan_size, 1)
+        temp = temp.reshape(self.scan_history, size_slice, self.nb_slice)
         scan_min = np.min(temp, axis=2)
         scan_mean = np.mean(temp, axis=2)
-        scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(20, size_slice)
-        scan_avg = scan_avg.reshape(20*size_slice)
-        self.scan = np.tile(scan_avg, 4)
+        scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(2*self.scan_history, size_slice)
+        scan_avg = scan_avg.reshape(2*self.scan_history*size_slice)
+        self.scan = np.tile(scan_avg, self.scan_tile)
         s_min = 0
         s_max = 10
         self.scan = np.clip(self.scan, 0.0, 10.0)
@@ -402,7 +408,7 @@ class MlAgentGymEnvTest(gym.Env):
         r_waypoint = 5.0 #3.2 #2.5 #1.6 #2 #3 #1.6 #6 #2.5 #2.5
         r_collision = -20 #-15
         r_scan = -0.2 #-0.15 #-0.3
-        r_angle = 0.6 #0.5 #1 #0.8 #1 #0.5
+        r_angle = 0.2 #0.6 #0.5 #1 #0.8 #1 #0.5
         r_rotation = -0.1 #-0.15 #-0.4 #-0.5 #-0.2 # 0.1
 
         angle_thresh = np.pi/6
@@ -427,7 +433,6 @@ class MlAgentGymEnvTest(gym.Env):
         :param k reward constant
         :return: returns reward colliding with obstacles
         """
-
         dist_to_goal = np.linalg.norm(
             np.array([
                 self.curr_pose.position.x - self.final_goal.x,
@@ -438,6 +443,7 @@ class MlAgentGymEnvTest(gym.Env):
         t_1 = self.num_iterations % 10
         if(self.num_iterations == 0 or self.reset_dist_to_goal_reg):
             self.dist_to_goal_reg = np.ones(10)*dist_to_goal
+            self.init_distance = max(dist_to_goal, 1e-6)  # éviter division par zéro
             self.reset_dist_to_goal_reg = False
 
         reward = 0.0
@@ -449,7 +455,10 @@ class MlAgentGymEnvTest(gym.Env):
         # elif(self.start_time < self.get_time() - self.max_time):
             reward = -r_arrival
         else:
-            reward = r_waypoint*(self.dist_to_goal_reg[t_1] - dist_to_goal)
+            delta = self.dist_to_goal_reg[t_1] - dist_to_goal
+            reward = (r_waypoint*delta)
+            # reward = (r_waypoint*delta) / self.init_distance
+            # reward = np.clip(reward, -r_waypoint, r_waypoint) # GPT didn't test
 
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
             self.node.get_logger().warning("Goal reward: {}  {}".format(dist_to_goal, reward), throttle_duration_sec=self.config.log.throttle_duration)
@@ -509,43 +518,6 @@ class MlAgentGymEnvTest(gym.Env):
         # prefer goal theta:
         theta_pre = np.arctan2(goal.y, goal.x)
         d_theta = theta_pre
-
-        # get the pedstrain's position:
-        if(len(mht_peds) != 0):  # tracker results
-            d_theta = np.pi/2 #theta_pre
-            N = 60
-            theta_min = 1000
-            for i in range(N):
-                theta = random.uniform(-np.pi, np.pi)
-                free = True
-                for ped in mht_peds.tracks:
-                    #ped_id = ped.track_id 
-                    # create pedestrian's postion costmap: 10*10 m
-                    p_x = ped.pose.pose.position.x
-                    p_y = ped.pose.pose.position.y
-                    p_vx = ped.twist.twist.linear.x
-                    p_vy = ped.twist.twist.linear.y
-                    
-                    ped_dis = np.linalg.norm([p_x, p_y])
-                    if(ped_dis <= 7):
-                        ped_theta = np.arctan2(p_y, p_x)
-                        vo_theta = np.arctan2(3*self.robot_radius, np.sqrt(ped_dis**2 - (3*self.robot_radius)**2))
-                        # collision cone:
-                        theta_rp = np.arctan2(v_x*np.sin(theta)-p_vy, v_x*np.cos(theta) - p_vx)
-                        if(theta_rp >= (ped_theta - vo_theta) and theta_rp <= (ped_theta + vo_theta)):
-                            free = False
-                            break
-
-                # reachable available theta:
-                if(free):
-                    theta_diff = (theta - theta_pre)**2
-                    if(theta_diff < theta_min):
-                        theta_min = theta_diff
-                        d_theta = theta
-                
-        else: # no obstacles:
-            d_theta = theta_pre
-
         reward = r_angle*(angle_thresh - abs(d_theta))
 
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
