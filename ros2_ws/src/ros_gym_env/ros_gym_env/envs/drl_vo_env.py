@@ -1,37 +1,92 @@
 #!/usr/bin/env python3
 import subprocess
-import time, math
-from math import cos, sin, atan2, sqrt
-import random
-import signal
-import atexit
-import threading
+import time, math, random
 import rclpy
 from rclpy.node import Node
 import gymnasium as gym
 import numpy as np
-import numpy.matlib
-from simulation_msgs.srv import Reset, Trigger, PausePlay
-from sensor_msgs.msg import LaserScan
+from simulation_msgs.srv import Reset
 from geometry_msgs.msg import Point, Twist, Pose, PoseStamped
-from nav_msgs.msg import Odometry, OccupancyGrid, Path
-from cnn_msgs.msg import CNNdata, MyCNNdata
-from threading import Event
-from tf_transformations import euler_from_quaternion
+from cnn_msgs.msg import CNNdata, MyCNNdata, AllCNNdata
+from agents_msgs.msg import AgentArray
 
 
-class MlAgentGymEnvTest(gym.Env):
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+def visualize_observation(ped_pos, scan, goal, step=0, save_dir="debug_obs"):
+        """
+        Sauvegarde les visualisations des différentes composantes de l'observation dans des fichiers PNG.
+        
+        Arguments :
+        - ped_pos : ndarray, les positions des piétons (shape: N*2)
+        - scan : ndarray, les données du lidar transformées (shape: 6400)
+        - goal : ndarray, la position du but (shape: 2)
+        - step : int, identifiant temporel pour nommer les fichiers (par exemple numéro d'étape)
+        - save_dir : str, dossier où sauvegarder les figures
+        """
+
+        os.makedirs(save_dir, exist_ok=True)
+
+        # ---- Scan ----
+        try:
+            scan_vis = scan.reshape((40, 160))
+            plt.figure(figsize=(10, 4))
+            plt.imshow(scan_vis, cmap='viridis', aspect='auto')
+            plt.title(f"Scan Visualization - Step {step}")
+            plt.colorbar()
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_dir, f"scan_step_{step:05d}.png"))
+            plt.close()
+        except Exception as e:
+            print(f"[Warning] Scan visualization failed: {e}")
+
+        # ---- Pedestrian Positions ----
+        try:
+            ped_pos_reshaped = ped_pos.reshape(-1, 2)
+            plt.figure()
+            plt.scatter(ped_pos_reshaped[:, 0], ped_pos_reshaped[:, 1], c='red')
+            plt.title(f"Pedestrian Positions - Step {step}")
+            plt.xlabel("X")
+            plt.ylabel("Y")
+            plt.grid(True)
+            plt.axis('equal')
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_dir, f"ped_pos_step_{step:05d}.png"))
+            plt.close()
+        except Exception as e:
+            print(f"[Warning] Pedestrian visualization failed: {e}")
+
+        # ---- Goal ----
+        try:
+            plt.figure()
+            plt.scatter(ped_pos_reshaped[:, 0], ped_pos_reshaped[:, 1], c='red', label='Pedestrians')
+            plt.scatter(goal[0], goal[1], c='green', marker='X', s=100, label='Goal')
+            plt.title(f"Pedestrians & Goal - Step {step}")
+            plt.xlabel("X")
+            plt.ylabel("Y")
+            plt.grid(True)
+            plt.axis('equal')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_dir, f"goal_overlay_step_{step:05d}.png"))
+            plt.close()
+        except Exception as e:
+            print(f"[Warning] Goal visualization failed: {e}")
+
+
+class DRLVOEnv(gym.Env):
     def __init__(self, env_id, config, env_id_display_log=None):
         super().__init__()
         self.config = config
         self.curriculum_level = 0
         
+        # env parameters:
         self.env_id = env_id
         self.env_id_display_log = env_id_display_log
         self.prefix = "/env_" + str(self.env_id)
         self.max_iteration = self.config.env.max_iteration #* (self.curriculum_level+1)
         self.max_time = self.config.env.max_time
-        
 
         # robot parameters:
         self.robot_radius = self.config.env.robot.robot_radius
@@ -39,12 +94,10 @@ class MlAgentGymEnvTest(gym.Env):
         self.dist_goal_history_number = self.config.env.robot.dist_goal_history_number
         self.min_linear_velocity = self.config.env.robot.min_linear_velocity
         self.max_linear_velocity = self.config.env.robot.max_linear_velocity
-
         self.min_angular_velocity = self.config.env.robot.min_angular_velocity
         self.max_angular_velocity = self.config.env.robot.max_angular_velocity
 
         # bumper:
-        self.bump_flag = False
         self.bump_num = 0
 
         # reward:
@@ -57,52 +110,34 @@ class MlAgentGymEnvTest(gym.Env):
         # Initialisation Node
         self.node = Node("ros_env_" + str(self.env_id))
 
-        self.start_time = self.get_time()
-
         # === Spaces ===
-        self.human_number = self.config.env.obs.human_number
-        self.human_obs_size = self.human_number * 5
-        self.scan_size = self.config.env.obs.scan_dim
-        self.nb_slice = self.config.env.obs.scan_slice
-        self.scan_history = self.config.env.obs.scan_history
-        self.scan_tile = self.config.env.obs.scan_tile
-        self.scan_obs_size = int((self.scan_size/self.nb_slice)*self.scan_history*2*self.scan_tile)
+        self.high_action = np.array([1, 1])
+        self.low_action = np.array([-1, -1])
+        self.action_space = gym.spaces.Box(low=self.low_action, high=self.high_action, dtype=np.float32)                               # Goal
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(19202,), dtype=np.float32)
 
-        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)                                 # Goal
-        self.observation_space = gym.spaces.Box(low=-math.inf, high=math.inf, shape=(self.scan_obs_size + 5 + self.human_obs_size,), dtype=np.float32)                      # Scan
-
-        # observation space
-        self.cnn_data = CNNdata()
-        self.agents = [(0.0, 0.0, 0.0, 0.0, 0.0) for i in range(self.human_number)]
+        self.cnn_data = AllCNNdata()
+        self.agents = AgentArray()
         self.scan = []
+        self.scan_size = 720
         self.goal = []
         self.mht_peds = []
 
         # info, initial position and goal position
         self.final_goal = Point()
-        self.local_goal_from_map = None
         self.local_goal_from_robot = None
         
-        self.init_pose = Pose()
         self.curr_pose = Pose()
         self.curr_vel = Twist()
         self.info = {}
         # episode done flag:
         self._episode_done = False
-        # goal reached flag:
-        self._goal_reached = False
         # reset flag:
         self._reset = True
 
         # === ROS topics ===
-        self.node.create_subscription(Odometry, self.prefix + self.config.env.ros.robot_odom, self._robot_vel_callback, 1)
-        self.node.create_subscription(PoseStamped, self.prefix + self.config.env.ros.robot_pose, self._robot_pose_callback, 1)
-        self.node.create_subscription(MyCNNdata, self.prefix + self.config.env.ros.cnn_data, self._cnn_data_callback, 1)
-        self.node.create_subscription(PoseStamped, self.prefix + self.config.env.ros.global_goal, self._final_goal_callback, 1)
+        self.node.create_subscription(AllCNNdata, self.prefix + self.config.env.ros.cnn_data, self._cnn_data_callback, 1)
         self.cmd_vel_publisher = self.node.create_publisher(Twist, self.prefix + self.config.env.ros.cmd_vel, 10)
-
-        self.obs = None
-        self.done = False
 
         # === Services ===
         self.reset_client = self.node.create_client(Reset, self.prefix + self.config.env.ros.reset_service)
@@ -123,12 +158,8 @@ class MlAgentGymEnvTest(gym.Env):
     
     def _set_init(self):
         self.node.get_logger().warning("Start initializing robot...", once=True)
-        # reset the robot velocity to 0:
         self.cmd_vel_publisher.publish(Twist())
 
-        #self._reset = True
-        # reset simulation to orignal:
-        t = time.time()
         if(self._reset): 
             self._reset = False
             req = Reset.Request()
@@ -136,38 +167,25 @@ class MlAgentGymEnvTest(gym.Env):
             future = self.reset_client.call_async(req)
             rclpy.spin_until_future_complete(self.node, future)
 
-        # self.node.get_logger().fatal("Time 1 {}".format(time.time() - t))
-
-            
-
         # initalize info:
         self.cnn_data = None
-        self.agents = [(0.0, 0.0, 0.0, 0.0, 0.0) for i in range(self.human_number)]
+        self.agents = AgentArray()
         self.scan = []
         self.goal = []
         self.mht_peds = []
 
-        # info, initial position and goal position
-        self.init_pose = Pose()
         self.curr_pose = None
         self.curr_vel = None
         self.info = {}
         self.final_goal = None
-        self.local_goal_from_map = None
         self.local_goal_from_robot = None
-
-        # self.init_pose = self.curr_pose # inital_pose.pose.pose
-        # self.curr_pose = self.curr_pose # inital_pose.pose.pose
-        # self.node.get_logger().warning("Robot was initiated as {}".format(self.init_pose), once=True)
 
         # reset pose valid flag:
         self.pos_valid_flag = True
         # reset bumper:
-        self.bump_flag = False
         self.bump_num = 0
         # reset the number of iterations:
         self.num_iterations = 0
-        self.start_time = self.get_time()
         # reset distance to goal register:
         # self.dist_to_goal_reg = np.zeros(self.dist_goal_history_number)
         self.reset_dist_to_goal_reg = True
@@ -175,16 +193,6 @@ class MlAgentGymEnvTest(gym.Env):
         self._episode_done = False
 
         while self.cnn_data == None:
-            rclpy.spin_once(self.node, timeout_sec=1.0)
-        while self.curr_pose == None:
-            rclpy.spin_once(self.node, timeout_sec=1.0)
-        while self.curr_vel == None:
-            rclpy.spin_once(self.node, timeout_sec=1.0)
-        while self.final_goal == None:
-            rclpy.spin_once(self.node, timeout_sec=1.0)
-        while self.local_goal_from_map == None:
-            rclpy.spin_once(self.node, timeout_sec=1.0)
-        while self.local_goal_from_robot == None:
             rclpy.spin_once(self.node, timeout_sec=1.0)
 
         dist_to_goal = np.linalg.norm(
@@ -194,100 +202,25 @@ class MlAgentGymEnvTest(gym.Env):
             ])
         )
         self.dist_to_goal_reg = np.ones(10)*dist_to_goal
-        self.init_distance = dist_to_goal
-
 
         # Give the system a little time to finish initialization
         self.node.get_logger().fatal("Finish initialize robot.", once=True)
-        
-        return self.init_pose, self.goal
-        
-    def _robot_vel_callback(self, robot_vel_msg):
-        self.curr_vel = robot_vel_msg.twist.twist
-
-    def _robot_pose_callback(self, robot_pose_msg):
-        self.curr_pose = robot_pose_msg.pose
 
     def _cnn_data_callback(self, cnn_data_msg):
         self.cnn_data = cnn_data_msg
+        self.curr_pose = self.cnn_data.robot_pose.pose
+        self.curr_vel = Twist()
+        self.curr_vel.linear.x = self.cnn_data.vel[0]
+        self.curr_vel.angular.z = self.cnn_data.vel[1]
+        self.final_goal = self.cnn_data.global_goal.pose.position
         self.goal = self.cnn_data.goal_cart
         self.local_goal_from_robot = self.cnn_data.local_goal_from_robot
-
-        # Position robot pour les calculs relatifs
-        if self.curr_pose is None:
-            robot_x, robot_y = 0.0, 0.0
-            robot_yaw = 0.0
-        else:
-            robot_x = self.curr_pose.position.x
-            robot_y = self.curr_pose.position.y
-            orientation_q = self.curr_pose.orientation
-            _, _, robot_yaw = euler_from_quaternion([
-                orientation_q.x,
-                orientation_q.y,
-                orientation_q.z,
-                orientation_q.w
-            ])
-
-        self.agents = [(0.0, 0.0, 0.0, 0.0, 0.0) for i in range(self.human_number)]
-
-        for i in range(len(self.cnn_data.agents.agents)):
-            if i >= self.human_number:
-                break
-
-            agent = self.cnn_data.agents.agents[i]
-            
-            x = agent.pose.position.x
-            y = agent.pose.position.y
-            vx = agent.velocity.linear.x
-            vy = agent.velocity.linear.y
-
-            dx = x - robot_x
-            dy = y - robot_y
-            # Rotation dans le repère local du robot (x: avant/arrière, y: gauche/droite)
-            dx_local = cos(-robot_yaw) * dx - sin(-robot_yaw) * dy
-            dy_local = sin(-robot_yaw) * dx + cos(-robot_yaw) * dy
-
-            vx_local = cos(-robot_yaw) * vx - sin(-robot_yaw) * vy
-            vy_local = sin(-robot_yaw) * vx + cos(-robot_yaw) * vy
-            dist = math.sqrt(dx**2 + dy**2)
-
-            self.agents[i] = (dx_local, dy_local, vx_local, vy_local, dist)
-            # self.agents[i] = (dx, dy, vx, vy, dist)  # ou ajouter dist à la fin si souhaité
-
-        if (self.local_goal_from_map is None):
-            self.local_goal_from_map = self.cnn_data.local_goal_from_map
-            return
-        
-        dist = np.linalg.norm(
-            np.array([
-            self.local_goal_from_map.x - self.cnn_data.local_goal_from_map.x,
-            self.local_goal_from_map.y - self.cnn_data.local_goal_from_map.y,
-            ])
-        )
-        if (dist < 0.2):
-            return
-        self.local_goal_from_map = self.cnn_data.local_goal_from_map
-        # self.dist_to_goal_reg = np.ones(10)*dist
-        
-    # def local_goal_from_map_callback(self, msg):
-    #     if (msg != self.local_goal_from_map):
-    #         self.local_goal_from_map = msg
-    #         self.reset_dist_to_goal_reg = True
-        
-
-    # def local_goal_from_robot_callback(self, msg):
-    #     self.node.get_logger().fatal("local_goal_from_robot_callback")
-    #     self.local_goal_from_robot = msg
-
-    def _final_goal_callback(self, final_goal_msg):
-        self.final_goal = final_goal_msg.pose.position
+        self.agents = self.cnn_data.agents
 
     def send_action(self, action):
         cmd_vel = Twist()
-
         cmd_vel.linear.x = (float(action[0]) + 1) * (self.max_linear_velocity - self.min_linear_velocity) / 2 + self.min_linear_velocity
         cmd_vel.angular.z = (float(action[1]) + 1) * (self.max_angular_velocity - self.min_angular_velocity) / 2 + self.min_angular_velocity
-
         self.cmd_vel_publisher.publish(cmd_vel)
 
     def step(self, action):
@@ -361,72 +294,76 @@ class MlAgentGymEnvTest(gym.Env):
         """
         Returns the observation.
         """
+        self.ped_pos = self.cnn_data.ped_pos_map
         self.scan = self.cnn_data.scan
-        self.goal = self.cnn_data.goal_cart
+        self.goal = np.array([
+                            self.local_goal_from_robot.x,
+                            self.local_goal_from_robot.y
+                        ], dtype=np.float32)
         self.vel = self.cnn_data.vel
         
         # ped map:
         # MaxAbsScaler:
-        # v_min = -2
-        # v_max = 2
-        # self.agents_pos = np.asarray(self.agents_pos, dtype=np.float32)
-        # self.agents_pos = 2 * (self.agents_pos - v_min) / (v_max - v_min) + (-1)
+        v_min = -2
+        v_max = 2
+        self.ped_pos = np.array(self.ped_pos, dtype=np.float32)
+        self.ped_pos = 2 * (self.ped_pos - v_min) / (v_max - v_min) + (-1)
 
         # scan map:
         # MaxAbsScaler:
-        size_slice = int(self.scan_size/self.nb_slice)
+        
         temp = np.array(self.scan, dtype=np.float32)
-        temp = temp.reshape(self.scan_history, self.scan_size, 1)
-        temp = temp.reshape(self.scan_history, size_slice, self.nb_slice)
-        scan_min = np.min(temp, axis=2)
-        scan_mean = np.mean(temp, axis=2)
-        scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(2*self.scan_history, size_slice)
-        scan_avg = scan_avg.reshape(2*self.scan_history*size_slice)
-        self.scan = np.tile(scan_avg, self.scan_tile)
+        scan_avg = np.zeros((20,80))
+        for n in range(10):
+            scan_tmp = temp[n*720:(n+1)*720]
+            for i in range(80):
+                scan_avg[2*n, i] = np.min(scan_tmp[i*9:(i+1)*9])
+                scan_avg[2*n+1, i] = np.mean(scan_tmp[i*9:(i+1)*9])
+        
+        scan_avg = scan_avg.reshape(1600)
+        scan_avg_map = np.matlib.repmat(scan_avg,1,4)
+        self.scan = scan_avg_map.reshape(6400)
         s_min = 0
         s_max = 10
-        self.scan = np.clip(self.scan, 0.0, 10.0)
         self.scan = 2 * (self.scan - s_min) / (s_max - s_min) + (-1)
+
+        t1 = np.min(self.scan)
+        t2 = np.max(self.scan)
         
         # goal:
-        goal = np.array([
-                            self.local_goal_from_robot.x,
-                            self.local_goal_from_robot.y
-                        ], dtype=np.float32)
-        dist_to_goal = self.dist_to_goal()
-        # np.linalg.norm(
-        #     np.array([
-        #         self.curr_pose.position.x - goal[0],
-        #         self.curr_pose.position.y - goal[1],
-        #     ])
-        # )
+        # MaxAbsScaler:
+        # g_min = -2
+        # g_max = 2
+        # self.goal = np.array(self.goal, dtype=np.float32)
+        # self.goal = 2 * (self.goal - g_min) / (g_max - g_min) + (-1)
+        #self.goal = self.goal.tolist()
+
+        '''
+        # vel:
+        # MaxAbsScaler:
+        vx_min = 0
+        vx_max = 0.5
+        wz_min = -2
+        wz_max = 2
+        self.vel = np.array(self.vel, dtype=np.float32)
+        self.vel[0] = 2 * (self.vel[0] - vx_min) / (vx_max - vx_min) + (-1)
+        self.vel[1] = 2 * (self.vel[1] - wz_min) / (wz_max - wz_min) + (-1)
+        '''
 
         # observation:
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            self.node.get_logger().warning("\n\n", throttle_duration_sec=self.config.log.throttle_duration)
-            self.node.get_logger().warning("Goal pos/dist: {} / {}".format(goal, dist_to_goal), throttle_duration_sec=self.config.log.throttle_duration)
-        
-        self.observation = np.concatenate((self.scan, goal, dist_to_goal, self.vel, self.agents), axis=None)
-
-        if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            self.node.get_logger().warning("Observation Shape = {}".format(self.observation.shape), throttle_duration_sec=self.config.log.throttle_duration)
+            visualize_observation(self.ped_pos, self.scan, self.goal, step=0)
             self.node.get_logger().warning(
-                "Observation => \n goal: {} \n dist_to_goal: {} \n vel: {} \n agents: {}".format(goal, dist_to_goal, self.vel, self.agents), 
+                "Observation => \n goal: {} \n scan: {} \n scan_min: {}\n scan_max: {}\n ped_pos: {} \n agents: {}".format(self.goal, self.scan, t1, t2, self.ped_pos, self.agents), 
                 throttle_duration_sec=self.config.log.throttle_duration)
-        
+        self.observation = np.concatenate((self.ped_pos, self.scan, self.goal), axis=None) #list(itertools.chain(self.ped_pos, self.scan, self.goal))
         return self.observation
     
     def _post_information(self):
-        """
-        Return:
-        info: {"init_pose", "goal", "current_pose"}
-        """
         self.info = {
-            "initial_pose": self.init_pose,
             "goal": self.goal,
             "current_pose": self.curr_pose
             }
-        
         return self.info
 
     def close(self):
@@ -434,16 +371,6 @@ class MlAgentGymEnvTest(gym.Env):
 
     def render(self, mode='human'):
         pass  # ou afficher des infos de debug
-
-
-
-
-
-
-
-
-
-
 
     def _compute_reward(self):
         """Calculates the reward to give based on the observations given.
@@ -466,14 +393,10 @@ class MlAgentGymEnvTest(gym.Env):
         r_c = self._obstacle_collision_punish(self.cnn_data.scan[-self.scan_size:], scan_penalty_threshold_factor, r_scan, r_collision)
         r_w = self._angular_velocity_punish(self.curr_vel.angular.z,  r_rotation, w_thresh)
         r_t = self._theta_reward(self.local_goal_from_robot, self.mht_peds, self.curr_vel.linear.x, r_angle, angle_thresh)
-        r_h = self._human_reward(r_human)
-        reward = self.config.env.reward.constant + r_g + r_c + r_t + r_h #+ r_w #+ r_v # + r_p
-        if self.dist_to_goal() < self.goal_radius*2:
-            reward -= self.curr_vel.linear.x * 0.5
-
+        reward = r_g + r_c + r_t + r_w
 
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            self.node.get_logger().warning("Compute reward done. \nreward = {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, r_g, r_c, r_w, r_t, r_h), throttle_duration_sec=self.config.log.throttle_duration)
+            self.node.get_logger().warning("Compute reward done. \nreward = {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}".format(reward, r_g, r_c, r_w, r_t), throttle_duration_sec=self.config.log.throttle_duration)
         return reward
 
     def dist_to_goal(self):
@@ -496,7 +419,7 @@ class MlAgentGymEnvTest(gym.Env):
         t_1 = self.num_iterations % 10
         if(self.num_iterations == 0 or self.reset_dist_to_goal_reg):
             self.dist_to_goal_reg = np.ones(10)*dist_to_goal
-            self.init_distance = max(dist_to_goal, 1e-6)  # éviter division par zéro
+            self.init_distance = max(dist_to_goal, 1e-6)
             self.reset_dist_to_goal_reg = False
 
         reward = 0.0
@@ -505,13 +428,10 @@ class MlAgentGymEnvTest(gym.Env):
             reward = r_arrival
             self.reset_dist_to_goal_reg = True
         elif(self.num_iterations >= self.max_iteration):
-        # elif(self.start_time < self.get_time() - self.max_time):
             reward = -r_arrival
         else:
             delta = self.dist_to_goal_reg[t_1] - dist_to_goal
             reward = (r_waypoint*delta)
-            # reward = (r_waypoint*delta) / self.init_distance
-            # reward = np.clip(reward, -r_waypoint, r_waypoint) # GPT didn't test
 
         self.dist_to_goal_reg[t_1] = dist_to_goal
 
@@ -545,28 +465,57 @@ class MlAgentGymEnvTest(gym.Env):
         return reward
 
     def _theta_reward(self, goal, mht_peds, v_x, r_angle, angle_thresh):
+        """
+        Returns negative reward if the robot turns.
+        :param w roatational speed of the robot
+        :param fac weight of reward punish for turning
+        :param thresh rotational speed > thresh will be punished
+        :return: returns reward for turning
+        """
         # prefer goal theta:
+        # theta_pre = np.arctan2(goal[1], goal[0])
         theta_pre = np.arctan2(goal.y, goal.x)
         d_theta = theta_pre
+
+        # get the pedstrain's position:
+        if(len(self.agents.agents) != 0):  # tracker results
+            d_theta = np.pi/2 #theta_pre
+            N = 60
+            theta_min = 1000
+            for i in range(N):
+                theta = random.uniform(-np.pi, np.pi)
+                free = True
+                for ped in self.agents.agents:
+                    #ped_id = ped.track_id 
+                    # create pedestrian's postion costmap: 10*10 m
+                    p_x = ped.pose.position.x
+                    p_y = ped.pose.position.y
+                    p_vx = ped.velocity.linear.x
+                    p_vy = ped.velocity.linear.y
+                    
+                    ped_dis = np.linalg.norm([p_x, p_y])
+                    if(ped_dis <= 7):
+                        ped_theta = np.arctan2(p_y, p_x)
+                        vo_theta = np.arctan2(3*self.robot_radius, np.sqrt(ped_dis**2 - (3*self.robot_radius)**2))
+                        # collision cone:
+                        theta_rp = np.arctan2(v_x*np.sin(theta)-p_vy, v_x*np.cos(theta) - p_vx)
+                        if(theta_rp >= (ped_theta - vo_theta) and theta_rp <= (ped_theta + vo_theta)):
+                            free = False
+                            break
+
+                # reachable available theta:
+                if(free):
+                    theta_diff = (theta - theta_pre)**2
+                    if(theta_diff < theta_min):
+                        theta_min = theta_diff
+                        d_theta = theta
+                
+        else: # no obstacles:
+            d_theta = theta_pre
+
         reward = r_angle*(angle_thresh - abs(d_theta))
-        reward = reward * (v_x / self.max_linear_velocity)
         return reward  
     
-    def _human_reward(self, r_human):
-        reward = 0.0
-        hps = self.config.env.reward.human_personal_distance
-
-        # for agent in self.agents:
-        #     dist = agent[4]
-        #     if dist > 0 and dist < hps:
-        #         reward -= (hps - dist) * r_human
-
-        dists = np.array([a[4] for a in self.agents])
-        mask = (dists > 0) & (dists < hps)
-        reward -= np.sum((hps - dists[mask]) * r_human)
-
-        return reward
-
     def get_time(self):
         return self.node.get_clock().now().nanoseconds * 1e-9
     

@@ -69,6 +69,7 @@ install(PROGRAMS
   scripts/rl_inference_node.py
   scripts/cnn_data_pub.py
   scripts/pure_pursuit.py
+  scripts/test.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

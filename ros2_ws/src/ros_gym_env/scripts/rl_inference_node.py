@@ -1,119 +1,112 @@
 #!/usr/bin/env python3
 
+import os
+import yaml
 import numpy as np
-import numpy.matlib
-import math, os
-
 import rclpy
 from rclpy.node import Node
-
-from geometry_msgs.msg import Twist
-from cnn_msgs.msg import CNNdata
-from stable_baselines3 import PPO
-
-from ros_gym_env.ros_gym_env.policy.drl_vo_cnn import *
-
 from ament_index_python.packages import get_package_share_directory
 
+from stable_baselines3 import PPO, SAC, DDPG
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import VecNormalize
 
-class DrlInference(Node):
+from ros_gym_env.envs.env_factory import *
+from ros_gym_env.envs.env_wrappers import *
+from ros_gym_env.policy.policy_factory import *
+
+class Config:
+    def __init__(self, d):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                v = Config(v)
+            setattr(self, k, v)
+
+    def to_dict(self):
+        result = {}
+        for k, v in self.__dict__.items():
+            if isinstance(v, Config):
+                result[k] = v.to_dict()
+            else:
+                result[k] = v
+        return result
+
+def load_ros2_package_config(package_name, relative_path):
+    pkg_path = get_package_share_directory(package_name)
+    config_path = os.path.join(pkg_path, relative_path)
+    with open(config_path, "r") as f:
+        data = yaml.safe_load(f)
+    return Config(data)
+
+def get_rl_algo(name):
+    name = name.lower()
+    algos = {
+        "ppo": PPO,
+        "sac": SAC,
+        "ddpg": DDPG
+    }
+    if name not in algos:
+        raise ValueError(f"RL Algo '{name}' non reconnue.")
+    return algos[name]
+
+class RLInferenceNode(Node):
     def __init__(self):
-        super().__init__('drl_inference_node')
+        super().__init__('rl_inference_node')
 
-        # Internal data
-        self.ped_pos = []
-        self.scan = []
-        self.goal = []
-        self.model = None
+        self.config_name = "training_002.yaml"  # <- adapte si besoin
+        self.config = load_ros2_package_config("ros_gym_env", "config/" + self.config_name)
 
-        model_directory = get_package_share_directory('ros_gym_env')
+        self.model_path = os.path.join(get_package_share_directory("ros_gym_env"), "model/test2.zip")
 
-        # Declare & retrieve parameter
-        self.declare_parameter('model_file', './model/drl_vo')
-        model_file = self.get_parameter('model_file').get_parameter_value().string_value
+        # --- Env construction ---
+        env_fns = [self.make_env(0)]
+        self.env = DummyVecEnv(env_fns)
 
-        # Load model
-        model_path = os.path.join(model_directory, model_file)
-        self.model = PPO.load(model_path)
-        self.get_logger().info('DRL-VO model loaded.')
+        if self.config.env.normalize_observation or self.config.env.normalize_reward:
+            self.env = VecNormalize.load(os.path.join(get_package_share_directory("ros_gym_env"), "model/vecnormalize.pkl"), self.env)
+            self.env.training = False
+            self.env.norm_reward = False
 
-        # ROS 2 Communication
-        self.subscription = self.create_subscription(
-            CNNdata,
-            '/env_0/cnn_data',
-            self.cnn_data_callback,
-            10
-        )
-        self.publisher = self.create_publisher(Twist, '/env_0/cmd_vel', 10)
+        self.env = VecEnvDelayWrapper(self.env, delay_sec=(0.05 / self.config.learning.speed_time))
 
-    def cnn_data_callback(self, msg):
-        self.get_logger().info('DRL-VO cnn_data_callback')
-        self.ped_pos = msg.ped_pos_map
-        self.scan = msg.scan
-        self.goal = msg.goal_cart
-        cmd_vel = Twist()
+        policy_class = method_factory[self.config.policy.name].get_policy(self.config)[0]
+        rl_algo = get_rl_algo(self.config.algo.name)
 
-        scan = np.array(self.scan[-540:-180])
-        scan = scan[scan != 0]
-        min_scan_dist = np.amin(scan) if scan.size != 0 else 10.0
+        self.model = rl_algo.load(self.model_path, env=self.env)
 
-        self.get_logger().info('DRL-VO goal : {} {}'.format(np.linalg.norm(self.goal), self.goal))
-        if np.linalg.norm(self.goal) <= 0.2:
-            cmd_vel.linear.x = 0.0
-            cmd_vel.angular.z = 0.0
-        elif min_scan_dist <= 0.4:
-            cmd_vel.linear.x = 0.0
-            cmd_vel.angular.z = 0.7
-        else:
-            # Scale ped_pos
-            v_min, v_max = -2, 2
-            ped_pos = np.array(self.ped_pos, dtype=np.float32)
-            ped_pos = 2 * (ped_pos - v_min) / (v_max - v_min) + (-1)
+        self.get_logger().info("Modèle chargé. Démarrage de l'inférence...")
 
-            # Scale scan
-            temp = np.array(self.scan, dtype=np.float32)
-            scan_avg = np.zeros((20, 80))
-            for n in range(10):
-                scan_tmp = temp[n * 720:(n + 1) * 720]
-                for i in range(80):
-                    scan_avg[2 * n, i] = np.min(scan_tmp[i * 9:(i + 1) * 9])
-                    scan_avg[2 * n + 1, i] = np.mean(scan_tmp[i * 9:(i + 1) * 9])
-            scan_avg = scan_avg.reshape(1600)
-            scan_avg_map = np.matlib.repmat(scan_avg, 1, 4)
-            scan_scaled = scan_avg_map.reshape(6400)
-            s_min, s_max = 0, 30
-            scan_scaled = 2 * (scan_scaled - s_min) / (s_max - s_min) + (-1)
+    def make_env(self, env_id):
+        def _init():
+            env = env_factory[self.config.env.name](env_id, self.config, env_id_display_log=1)
+            return env
+        return _init
 
-            # Scale goal
-            g_min, g_max = -2, 2
-            goal_original = np.array(self.goal, dtype=np.float32)
-            goal_scaled = 2 * (goal_original - g_min) / (g_max - g_min) + (-1)
+    def run_inference(self, episodes=20):
+        for ep in range(episodes):
+            obs = self.env.reset()
+            done = False
+            total_reward = 0
+            steps = 0
+            while not done:
+                action, _ = self.model.predict(obs, deterministic=True)
+                obs, reward, done, info = self.env.step(action)
+                total_reward += reward
+                steps += 1
+            self.get_logger().info(f"[Episode {ep+1}] Reward: {total_reward} | Steps: {steps}")
 
-            # Observation
-            observation = np.concatenate((ped_pos, scan_scaled, goal_scaled), axis=None)
-
-            # Inference
-            action, _ = self.model.predict(observation)
-
-            # Rescale output
-            vx_min, vx_max = 0, 0.5
-            vz_min, vz_max = -2, 2
-            cmd_vel.linear.x = (action[0] + 1) * (vx_max - vx_min) / 2 + vx_min
-            cmd_vel.angular.z = (action[1] + 1) * (vz_max - vz_min) / 2 + vz_min
-
-        # Publish
-        self.get_logger().info('DRL-VO cmd_vel {}'.format(cmd_vel))
-        if not np.isnan(cmd_vel.linear.x) and not np.isnan(cmd_vel.angular.z):
-            self.publisher.publish(cmd_vel)
-
+        self.env.close()
 
 def main(args=None):
     rclpy.init(args=args)
-    node = DrlInference()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
+    node = RLInferenceNode()
+    try:
+        node.run_inference()
+    except Exception as e:
+        node.get_logger().error(f"Erreur durant l'inférence : {e}")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

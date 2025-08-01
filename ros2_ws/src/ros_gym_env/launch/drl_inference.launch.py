@@ -42,14 +42,14 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # Node(
-        #     package='ros_gym_env',
-        #     executable='rl_inference_node.py',
-        #     name='rl_inference',
-        #     namespace=namespace,
-        #     output='screen',
-        #     parameters=[{
-        #         'model_file': LaunchConfiguration('model_file')
-        #     }]
-        # ),
+        Node(
+            package='ros_gym_env',
+            executable='rl_inference_node.py',
+            name='rl_inference',
+            namespace=namespace,
+            output='screen',
+            parameters=[{
+                'model_file': LaunchConfiguration('model_file')
+            }]
+        ),
     ])

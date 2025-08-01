@@ -1,3 +1,4 @@
+agents_msgs/AgentArray agents
 float32[] ped_pos_map		# pedestrian's positon costmap in Cartesian coordinate: 2 channel, 20m * 20m
 float32[] scan	  	# 720 range data from the laser scan
 float32[] scan_all	# 1080 range data from the laser scan

@@ -1,8 +1,8 @@
 # Learning params
 learning:
   total_timesteps: 50000000
-  n_steps: 1024
-  learning_rate: 0.0003
+  n_steps: 512
+  learning_rate: 0.00005
   num_envs: 10
   speed_time: 1.0
   save_model_frequency: 1000000
@@ -23,29 +23,23 @@ log:
 algo:
   name: "ppo"
   clip_range: 0.2
-  batch_size: 1024        # Plus stable si assez de RAM
-  n_epochs: 10            # Plus d'apprentissage si environnement stable
+  batch_size: 128        
+  n_epochs: 10            
   vf_coef: 0.5
-  ent_coef: 0.005         # Réduit un peu l'exploration
+  ent_coef: 0.005         
   learning_rate_schedule: "linear"
   seed: 42
 
 # Policy network
 policy:
-  # name: "scan"
-  # name: "mlagent"
   name: "drl-vo"
-  features_dim: 512
-  pi_layers: [512, 256]
-  vf_layers: [256, 128]
+  features_dim: 256
+  pi_layers: [256]
+  vf_layers: [128]
   activation_fn: "tanh"
 
 # Environment observations
 env:
-  # name: "ros_gym_env"
-  # name: "simple_env"
-  # name: "mlagent_env"
-  # name: "test"
   name: "drl-vo"
   max_iteration: 5000
   max_time: 90
@@ -55,7 +49,7 @@ env:
   obs:
     goal: true
     scan: true
-    scan_dim: 128 #32 #720
+    scan_dim: 720
     scan_history: 5
     scan_slice: 16 #4 
     scan_tile: 1

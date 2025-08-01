@@ -11,11 +11,12 @@ class CurriculumManager:
         self.epsilon = epsilon
         self.patience = patience
 
-    def update(self, new_reward):
+    def update(self, new_reward, ros_node=None):
         self.recent_rewards.append(new_reward)
         if len(self.recent_rewards) == self.recent_rewards.maxlen:
             avg = np.mean(self.recent_rewards)
             if self.prev_avg is not None:
+                ros_node.get_logger().fatal("ABS/EPS ==> {} {}".format(abs(avg - self.prev_avg), self.epsilon))
                 if abs(avg - self.prev_avg) < self.epsilon:
                     self.plateau_counter += 1
                 else:
@@ -26,28 +27,26 @@ class CurriculumManager:
                 self.level += 1
                 self.plateau_counter = 0
                 print(f"[Curriculum] Plateau détecté, passage au niveau {self.level}")
-                return True  # indique qu'on doit changer de niveau
+                return True 
 
-        return False  # pas encore prêt à changer
+        return False
 
 
 
 from stable_baselines3.common.callbacks import BaseCallback
 
 class CurriculumCallback(BaseCallback):
-    def __init__(self, curriculum_manager, envs, verbose=0):
+    def __init__(self, curriculum_manager, envs, verbose=0, ros_node=None):
         super().__init__(verbose)
         self.curriculum = curriculum_manager
         self.envs = envs
+        self.ros_node = ros_node
+
+    def _on_rollout_end(self):
+        self.logger.record('curriculum/avg', float(self.curriculum.prev_avg or 0.0))
+        self.logger.record('curriculum/epsilon', float(self.curriculum.epsilon))
+        self.logger.record('curriculum/level', self.curriculum.level)
 
     def _on_step(self):
-        # Prend la moyenne de la reward par épisode depuis les logs de Monitor
-        if 'rollout/ep_rew_mean' in self.logger.name_to_value:
-            rew = self.logger.name_to_value['rollout/ep_rew_mean']
-            if self.curriculum.update(rew):
-                # Notifie l'environnement
-                if hasattr(self.envs, "envs"):
-                    for env in self.envs.envs:
-                        if hasattr(env, 'set_curriculum_level'):
-                            env.set_curriculum_level(self.curriculum.level)
+        # Nécessaire même si non utilisé
         return True

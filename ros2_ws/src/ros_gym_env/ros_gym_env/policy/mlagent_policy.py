@@ -12,7 +12,7 @@ class MLAgentFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=512, config = None):
         super().__init__(observation_space, features_dim)
         self.config = config
-        self.obs_size = 645 #325 #6405
+        self.obs_size = 90 #85 #645 #325 #6405
         self.norm_mean = nn.Parameter(th.zeros(self.obs_size), requires_grad=False)
         self.norm_std = nn.Parameter(th.ones(self.obs_size), requires_grad=False)
 

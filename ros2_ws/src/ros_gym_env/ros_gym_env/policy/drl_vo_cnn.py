@@ -139,7 +139,7 @@ class DRL_VO_CNN(BaseFeaturesExtractor):
     #
     # This method is the main function.
     #
-    def __init__(self, observation_space: gym.spaces.Box, features_dim:int = 256):
+    def __init__(self, observation_space: gym.spaces.Box, features_dim:int = 256, config = None):
         # network parameters:
         block = Bottleneck
         layers = [2, 1, 1]

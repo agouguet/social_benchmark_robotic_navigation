@@ -74,11 +74,19 @@ class RLTrainerNode(Node):
     def __init__(self):
         super().__init__('rl_trainer_node')
 
-        self.config_name = "training_002.yaml"
+        # self.config_name = "training_002.yaml"
+        self.config_name = "drl-vo_training.yaml"
         self.config = load_ros2_package_config("ros_gym_env", "config/"+self.config_name)
         model_name = "model/"
         self.model_path = os.path.join(get_package_share_directory("ros_gym_env"), model_name)
         self.use_model = False
+
+        self.curriculum = CurriculumManager(
+            max_level=self.config.learning.curriculum.max_level,
+            window_size=self.config.learning.curriculum.window_size,
+            epsilon=self.config.learning.curriculum.epsilon,
+            patience=self.config.learning.curriculum.patience
+        )
 
         # Env creation
         env_ids = np.arange(self.config.learning.num_envs)
@@ -86,6 +94,7 @@ class RLTrainerNode(Node):
         self.env = DummyVecEnv(env_fns)
         self.env = VecNormalize(self.env, norm_obs=self.config.env.normalize_observation, norm_reward=self.config.env.normalize_reward)
         self.env = VecEnvDelayWrapper(self.env, delay_sec=(0.05 / self.config.learning.speed_time))
+        self.env = RewardTrackingVecWrapper(self.env, self.curriculum, ros_node=self)
 
         policy, policy_kwargs = method_factory[self.config.policy.name].get_policy(self.config)
 
@@ -115,13 +124,6 @@ class RLTrainerNode(Node):
                 normalize_advantage=True,
                 seed=self.config.algo.seed
             )
-        
-        self.curriculum = CurriculumManager(
-            max_level=self.config.learning.curriculum.max_level,
-            window_size=self.config.learning.curriculum.window_size,
-            epsilon=self.config.learning.curriculum.epsilon,
-            patience=self.config.learning.curriculum.patience
-        )
 
     def make_env(self, env_id):
         def _init():
@@ -135,14 +137,16 @@ class RLTrainerNode(Node):
         log_interval = max(1, int(self.config.log.log_interval / self.config.learning.num_envs))
         postfix = "_norm" if self.config.env.normalize_reward or self.config.env.normalize_observation else ""
         name_log = f'{self.config.policy.name}_{self.config.learning.num_envs}_{self.config.env.name}{postfix}'
-        
+        if self.config.log.name != "":
+            name_log = self.config.log.name
+
         checkpoint_callback = CheckpointCallback(
             save_freq=self.config.learning.save_model_frequency // self.config.learning.num_envs,  # fréquence = 1M steps globaux
             save_path="./model/",
             name_prefix=name_log+"_checkpoint"
         )
 
-        curriculum_callback = CurriculumCallback(self.curriculum, self.env)
+        curriculum_callback = CurriculumCallback(self.curriculum, self.env, ros_node=self)
 
         self.model.learn(
             total_timesteps=self.config.learning.total_timesteps,
@@ -167,6 +171,8 @@ def main(args=None):
     finally:
         postfix = "_norm" if node.config.env.normalize_reward or node.config.env.normalize_observation else ""
         name_log = f'{node.config.policy.name}_{node.config.learning.num_envs}_{node.config.env.name}{postfix}'
+        if node.config.log.name != "":
+            name_log = node.config.log.name
         log_dir = get_latest_log_dir(node.config.log.log_dir, name_log)
 
         os.makedirs(log_dir, exist_ok=True)
