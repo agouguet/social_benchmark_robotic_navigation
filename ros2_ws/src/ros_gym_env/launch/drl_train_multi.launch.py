@@ -50,15 +50,15 @@ def launch_setup(context, *args, **kwargs):
             output='screen'
         ))
 
-        nodes.append(Node(
-            package='pkg-nav',
-            executable='velocity_smoother_node.py',
-            name='velocity_smoother',
-            namespace=namespace,
-            parameters=[{'frequency': frequency}],
-            arguments=['--ros-args', '--log-level', "fatal"], #log_level],
-            output='screen'
-        ))
+        # nodes.append(Node(
+        #     package='pkg-nav',
+        #     executable='velocity_smoother_node.py',
+        #     name='velocity_smoother',
+        #     namespace=namespace,
+        #     parameters=[{'frequency': frequency}],
+        #     arguments=['--ros-args', '--log-level', "fatal"], #log_level],
+        #     output='screen'
+        # ))
 
         # nodes.append(Node(
         #     package = 'base_nav',

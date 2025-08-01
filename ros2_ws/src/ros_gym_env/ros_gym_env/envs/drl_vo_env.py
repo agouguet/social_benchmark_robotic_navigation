@@ -224,14 +224,31 @@ class DRLVOEnv(gym.Env):
         self.cmd_vel_publisher.publish(cmd_vel)
 
     def step(self, action):
+        step_time = time.time()
+        time_tmp = time.time()
         self.send_action(action)
+        action_time = time.time() - time_tmp
 
+        time_tmp = time.time()
         rclpy.spin_once(self.node, timeout_sec=0.05)
+        spin_time = time.time() - time_tmp
 
+        time_tmp = time.time()
         obs = self._get_observation()
+        obs_time = time.time() - time_tmp
+
+        time_tmp = time.time()
         reward = self._compute_reward()
+        reward_time = time.time() - time_tmp
+
         done = self._is_done(reward)
         truncated = False
+
+        # if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
+        #     self.node.get_logger().fatal("\nStep Time: {}\n    action time: {}\n    spin time: {}\n    obs time: {}\n    reward time: {}".format(
+        #             time.time() - step_time, action_time, spin_time, obs_time, reward_time
+        #         ), 
+        #         throttle_duration_sec=self.config.log.throttle_duration)
         return obs, reward, done, truncated, {}
 
 
@@ -294,6 +311,7 @@ class DRLVOEnv(gym.Env):
         """
         Returns the observation.
         """
+        t = time.time()
         self.ped_pos = self.cnn_data.ped_pos_map
         self.scan = self.cnn_data.scan
         self.goal = np.array([
@@ -311,7 +329,16 @@ class DRLVOEnv(gym.Env):
 
         # scan map:
         # MaxAbsScaler:
-        
+
+        # size_slice = 80
+        # temp = np.array(self.scan, dtype=np.float32)
+        # temp = temp.reshape(10, self.scan_size, 1)
+        # temp = temp.reshape(10, size_slice, 9)
+        # scan_min = np.min(temp, axis=2)
+        # scan_mean = np.mean(temp, axis=2)
+        # scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(20, size_slice)
+        # scan_avg = scan_avg.reshape(20*size_slice)
+        # self.scan = np.tile(scan_avg, 4)
         temp = np.array(self.scan, dtype=np.float32)
         scan_avg = np.zeros((20,80))
         for n in range(10):
@@ -319,7 +346,6 @@ class DRLVOEnv(gym.Env):
             for i in range(80):
                 scan_avg[2*n, i] = np.min(scan_tmp[i*9:(i+1)*9])
                 scan_avg[2*n+1, i] = np.mean(scan_tmp[i*9:(i+1)*9])
-        
         scan_avg = scan_avg.reshape(1600)
         scan_avg_map = np.matlib.repmat(scan_avg,1,4)
         self.scan = scan_avg_map.reshape(6400)
@@ -338,6 +364,8 @@ class DRLVOEnv(gym.Env):
         # self.goal = 2 * (self.goal - g_min) / (g_max - g_min) + (-1)
         #self.goal = self.goal.tolist()
 
+        self.vel = np.array(self.vel, dtype=np.float32)
+
         '''
         # vel:
         # MaxAbsScaler:
@@ -352,9 +380,9 @@ class DRLVOEnv(gym.Env):
 
         # observation:
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            visualize_observation(self.ped_pos, self.scan, self.goal, step=0)
+            # visualize_observation(self.ped_pos, self.scan, self.goal, step=0)
             self.node.get_logger().warning(
-                "Observation => \n goal: {} \n scan: {} \n scan_min: {}\n scan_max: {}\n ped_pos: {} \n agents: {}".format(self.goal, self.scan, t1, t2, self.ped_pos, self.agents), 
+                "\nObservation (step {}) => \n    goal: {} \n    vel: {} \n    scan: {} \n    scan_min: {}\n     scan_max: {}\n     ped_pos: {} \n     agents: {}".format(self.num_iterations, self.goal, self.vel, self.scan, t1, t2, self.ped_pos, self.agents), 
                 throttle_duration_sec=self.config.log.throttle_duration)
         self.observation = np.concatenate((self.ped_pos, self.scan, self.goal), axis=None) #list(itertools.chain(self.ped_pos, self.scan, self.goal))
         return self.observation
@@ -396,7 +424,7 @@ class DRLVOEnv(gym.Env):
         reward = r_g + r_c + r_t + r_w
 
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            self.node.get_logger().warning("Compute reward done. \nreward = {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}".format(reward, r_g, r_c, r_w, r_t), throttle_duration_sec=self.config.log.throttle_duration)
+            self.node.get_logger().warning("\nreward = {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}".format(reward, r_g, r_c, r_w, r_t), throttle_duration_sec=self.config.log.throttle_duration)
         return reward
 
     def dist_to_goal(self):
