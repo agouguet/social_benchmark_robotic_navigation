@@ -35,8 +35,6 @@ class MlAgentGymEnvTest(gym.Env):
 
         # robot parameters:
         self.robot_radius = self.config.env.robot.robot_radius
-        self.goal_radius = self.config.env.robot.goal_radius
-        self.dist_goal_history_number = self.config.env.robot.dist_goal_history_number
         self.min_linear_velocity = self.config.env.robot.min_linear_velocity
         self.max_linear_velocity = self.config.env.robot.max_linear_velocity
 
@@ -48,6 +46,8 @@ class MlAgentGymEnvTest(gym.Env):
         self.bump_num = 0
 
         # reward:
+        self.goal_radius = self.config.env.reward.goal_radius
+        self.dist_goal_history_number = self.config.env.reward.goal_dist_history_number
         self.dist_to_goal_reg = np.zeros(self.dist_goal_history_number)
         self.init_distance = 0
         self.reset_dist_to_goal_reg = True

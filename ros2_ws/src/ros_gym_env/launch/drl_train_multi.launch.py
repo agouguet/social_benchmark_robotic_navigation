@@ -40,15 +40,15 @@ def launch_setup(context, *args, **kwargs):
             break
         namespace = f'env_{i}'
 
-        nodes.append(Node(
-            package='ros_gym_env',
-            executable='cnn_data_pub.py',
-            name='cnn_data_pub',
-            namespace=namespace,
-            parameters=[{'frequency': frequency}],
-            arguments=['--ros-args', '--log-level', log_level],
-            output='screen'
-        ))
+        # nodes.append(Node(
+        #     package='ros_gym_env',
+        #     executable='cnn_data_pub.py',
+        #     name='cnn_data_pub',
+        #     namespace=namespace,
+        #     parameters=[{'frequency': frequency}],
+        #     arguments=['--ros-args', '--log-level', log_level],
+        #     output='screen'
+        # ))
 
         # nodes.append(Node(
         #     package='pkg-nav',

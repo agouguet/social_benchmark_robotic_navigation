@@ -12,7 +12,7 @@ from tf_transformations import euler_from_quaternion
 
 import numpy as np
 
-NUM_TP = 10
+NUM_TP = 5
 
 class CnnDataNode(Node):
     def __init__(self):

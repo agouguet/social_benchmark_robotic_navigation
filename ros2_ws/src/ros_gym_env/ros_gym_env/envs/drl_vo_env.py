@@ -14,66 +14,6 @@ from agents_msgs.msg import AgentArray
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-def visualize_observation(ped_pos, scan, goal, step=0, save_dir="debug_obs"):
-        """
-        Sauvegarde les visualisations des différentes composantes de l'observation dans des fichiers PNG.
-        
-        Arguments :
-        - ped_pos : ndarray, les positions des piétons (shape: N*2)
-        - scan : ndarray, les données du lidar transformées (shape: 6400)
-        - goal : ndarray, la position du but (shape: 2)
-        - step : int, identifiant temporel pour nommer les fichiers (par exemple numéro d'étape)
-        - save_dir : str, dossier où sauvegarder les figures
-        """
-
-        os.makedirs(save_dir, exist_ok=True)
-
-        # ---- Scan ----
-        try:
-            scan_vis = scan.reshape((40, 160))
-            plt.figure(figsize=(10, 4))
-            plt.imshow(scan_vis, cmap='viridis', aspect='auto')
-            plt.title(f"Scan Visualization - Step {step}")
-            plt.colorbar()
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_dir, f"scan_step_{step:05d}.png"))
-            plt.close()
-        except Exception as e:
-            print(f"[Warning] Scan visualization failed: {e}")
-
-        # ---- Pedestrian Positions ----
-        try:
-            ped_pos_reshaped = ped_pos.reshape(-1, 2)
-            plt.figure()
-            plt.scatter(ped_pos_reshaped[:, 0], ped_pos_reshaped[:, 1], c='red')
-            plt.title(f"Pedestrian Positions - Step {step}")
-            plt.xlabel("X")
-            plt.ylabel("Y")
-            plt.grid(True)
-            plt.axis('equal')
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_dir, f"ped_pos_step_{step:05d}.png"))
-            plt.close()
-        except Exception as e:
-            print(f"[Warning] Pedestrian visualization failed: {e}")
-
-        # ---- Goal ----
-        try:
-            plt.figure()
-            plt.scatter(ped_pos_reshaped[:, 0], ped_pos_reshaped[:, 1], c='red', label='Pedestrians')
-            plt.scatter(goal[0], goal[1], c='green', marker='X', s=100, label='Goal')
-            plt.title(f"Pedestrians & Goal - Step {step}")
-            plt.xlabel("X")
-            plt.ylabel("Y")
-            plt.grid(True)
-            plt.axis('equal')
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_dir, f"goal_overlay_step_{step:05d}.png"))
-            plt.close()
-        except Exception as e:
-            print(f"[Warning] Goal visualization failed: {e}")
-
 
 class DRLVOEnv(gym.Env):
     def __init__(self, env_id, config, env_id_display_log=None):
@@ -90,8 +30,6 @@ class DRLVOEnv(gym.Env):
 
         # robot parameters:
         self.robot_radius = self.config.env.robot.robot_radius
-        self.goal_radius = self.config.env.robot.goal_radius
-        self.dist_goal_history_number = self.config.env.robot.dist_goal_history_number
         self.min_linear_velocity = self.config.env.robot.min_linear_velocity
         self.max_linear_velocity = self.config.env.robot.max_linear_velocity
         self.min_angular_velocity = self.config.env.robot.min_angular_velocity
@@ -101,6 +39,8 @@ class DRLVOEnv(gym.Env):
         self.bump_num = 0
 
         # reward:
+        self.goal_radius = self.config.env.reward.goal_radius
+        self.dist_goal_history_number = self.config.env.reward.goal_dist_history_number
         self.dist_to_goal_reg = np.zeros(self.dist_goal_history_number)
         self.init_distance = 0
         self.reset_dist_to_goal_reg = True
@@ -279,7 +219,9 @@ class DRLVOEnv(gym.Env):
         # 2) Obstacle collision?
         scan = np.array(self.cnn_data.scan[-self.scan_size:], dtype=np.float32)
         scan = scan[(scan > 0) & np.isfinite(scan)]
-        min_scan_dist = np.min(scan[scan > 0])
+        # if scan[scan > 0].size <= 0:
+        #     self.node.get_logger().fatal("223 {}".format(scan[scan > 0]))
+        min_scan_dist = np.min(scan[scan > 0]) if scan[scan > 0].size > 0 else math.inf
         #if(self.bump_flag == True): #or self.pos_valid_flag == False):
         if(min_scan_dist <= self.robot_radius and min_scan_dist >= 0.02):
             self.bump_num += 1
@@ -339,6 +281,9 @@ class DRLVOEnv(gym.Env):
         # scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(20, size_slice)
         # scan_avg = scan_avg.reshape(20*size_slice)
         # self.scan = np.tile(scan_avg, 4)
+        self.scan = np.array(self.scan, dtype=np.float32)
+        t1 = np.min(self.scan)
+        t2 = np.max(self.scan)
         temp = np.array(self.scan, dtype=np.float32)
         scan_avg = np.zeros((20,80))
         for n in range(10):
@@ -353,8 +298,7 @@ class DRLVOEnv(gym.Env):
         s_max = 10
         self.scan = 2 * (self.scan - s_min) / (s_max - s_min) + (-1)
 
-        t1 = np.min(self.scan)
-        t2 = np.max(self.scan)
+        
         
         # goal:
         # MaxAbsScaler:
@@ -475,7 +419,9 @@ class DRLVOEnv(gym.Env):
         """
         scan = np.array(scan, dtype=np.float32)
         scan = scan[(scan > 0) & np.isfinite(scan)]
-        min_scan_dist = np.min(scan[scan > 0])
+        # if scan[scan > 0].size <= 0:
+        #     self.node.get_logger().fatal("426 {}".format(scan[scan > 0]))
+        min_scan_dist = np.min(scan[scan > 0]) if scan[scan > 0].size > 0 else math.inf
         #if(self.bump_flag == True): #or self.pos_valid_flag == False):
         if(min_scan_dist <= self.robot_radius and min_scan_dist >= 0.02):
             reward = r_collision

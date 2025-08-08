@@ -78,3 +78,4 @@ class RewardTrackingVecWrapper(VecEnvWrapper):
                     self.node.get_logger().fatal(f"[Curriculum] 🚀 Passage global au niveau {self.curriculum.level}")
 
         return obs, rewards, dones, infos
+        

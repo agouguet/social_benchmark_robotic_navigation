@@ -40,7 +40,7 @@ policy:
 
 # Environment observations
 env:
-  name: "drl-vo"
+  name: "crowd_height"
   max_iteration: 5000
   max_time: 90
   normalize_reward: False #True
