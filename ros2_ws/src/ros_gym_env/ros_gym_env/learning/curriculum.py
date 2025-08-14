@@ -77,3 +77,21 @@ class PolicyUpdateCallback(BaseCallback):
     def _on_step(self):
         # Nécessaire même si non utilisé
         return True
+    
+class SuccessRateCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.successes = []
+    
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            if "is_success" in info:
+                self.successes.append(1 if info["is_success"] else 0)
+        return True
+
+    def _on_rollout_end(self) -> None:
+        if len(self.successes) > 0:
+            success_rate = np.mean(self.successes)
+            self.logger.record("eval/success_rate", success_rate)
+            self.successes.clear()

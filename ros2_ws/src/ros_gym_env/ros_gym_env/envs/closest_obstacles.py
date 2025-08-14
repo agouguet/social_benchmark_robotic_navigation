@@ -22,7 +22,7 @@ from threading import Event
 
 
 
-class MyEnv(ROSEnv):
+class ClosestObstaclesEnv(ROSEnv):
     def __init__(self, env_id, config, env_id_display_log=None):
         super().__init__(env_id, config, env_id_display_log)
 
@@ -30,13 +30,41 @@ class MyEnv(ROSEnv):
         self.dist_goal_history_number = self.config.env.reward.goal_dist_history_number
 
     def init_info(self):
-        self.steps_on_goal = 0
         # reset bumper:
         self.bump_num = 0
         dist_to_goal = self.dist_to_goal()
         self.dist_to_goal_reg = np.ones(10)*dist_to_goal
 
+    def _is_done(self, reward):
+        if(self.dist_to_goal() <= self.goal_radius):
+            return True
+
+        scan = np.array(self.scan[-self.scan_size:], dtype=np.float32)
+        scan = scan[(scan > 0) & np.isfinite(scan)]
+        min_scan_dist = np.min(scan) if scan.size > 0 else math.inf
+
+
+        # if ((self.env_id_display_log == self.env_id or self.env_id_display_log == None)):
+        #     self.node.get_logger().warning("Done : {}  {}  {}".format(self.dist_to_goal(), min_scan_dist, self.bump_num)
+        #                                    , throttle_duration_sec=self.config.log.throttle_duration
+        #                                    )
+
+        if(min_scan_dist <= self.robot_radius and min_scan_dist >= 0.02):
+            self.bump_num += 1
+
+        if(self.bump_num >= 3):
+            return True
+
+        if(self.num_iterations > self.max_iteration):
+            return True
+
+        return False
+    
+
     def _get_observation(self):
+        """
+        Returns the observation.
+        """
         obs = ()
 
         # scan:
@@ -44,50 +72,22 @@ class MyEnv(ROSEnv):
             scan = np.array(self.scan, dtype=np.float32)
             scan = scan.reshape(self.scan_history*self.scan_size)
             debug_index = self.scan_size
-
-            if self.config.env.obs.scan_avg_pool or self.config.env.obs.scan_min_pool:
-                size_slice = int(self.scan_size/self.nb_slice)
-                scan = scan.reshape(self.scan_history, size_slice, self.nb_slice)
-                stack = ()
-                size = 0
-                if self.config.env.obs.scan_avg_pool:
-                    stack += (np.mean(scan, axis=2),)
-                    size += 1
-                if self.config.env.obs.scan_min_pool:
-                    stack += (np.min(scan, axis=2),)
-                    size += 1
-                scan_avg = np.stack(stack, axis=1).reshape(size*self.scan_history, size_slice)
-                scan = scan_avg.reshape(size*self.scan_history*size_slice)
-                debug_index = size_slice
-            scan = np.tile(scan, self.scan_tile)
-            if self.config.env.obs.scan_norm:
-                s_min = 0
-                s_max = 10
-                scan = np.clip(scan, s_min, s_max)
-                scan = scan / s_max
+            print(self.topk_nearest_points_from_scan(scan[-debug_index:], k=8))
             obs += (scan,)
-            if(self.ros_debug):
-                self.publish_debug_scan_observation(scan[-debug_index:])
         
         # goal:
         if self.config.env.obs.goal:
-            # goal = np.array([
-            #                     self.local_goal_from_robot.x,
-            #                     self.local_goal_from_robot.y
-            #                 ], dtype=np.float32)
-            # obs += (goal,)
-            angle = np.arctan2(self.local_goal_from_robot.y, self.local_goal_from_robot.x)  # entre -pi et pi
-            normalized_angle = angle / np.pi  # normalisé entre -1 et 1
-            obs += (normalized_angle,)
+            goal = np.array([
+                                self.local_goal_from_robot.x,
+                                self.local_goal_from_robot.y
+                            ], dtype=np.float32)
+            obs += (goal,)
 
-        dist_to_goal = 0
         if self.config.env.obs.goal_dist:
             dist_to_goal = self.dist_to_goal()
-            dist_to_goal = np.clip(dist_to_goal, 0, 1)
             obs += (dist_to_goal,)
-
+            
         # vel:
-        vel = []
         if self.config.env.obs.robot_velocity:
             vel = np.array([self.curr_vel.linear.x, self.curr_vel.angular.z], dtype=np.float32)
             obs += (vel,)
@@ -102,41 +102,65 @@ class MyEnv(ROSEnv):
 
         if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
             self.node.get_logger().warning("\n\n", throttle_duration_sec=self.config.log.throttle_duration)
+        #     self.node.get_logger().warning("Goal pos/dist: {} / {}".format(goal, dist_to_goal), throttle_duration_sec=self.config.log.throttle_duration)
+
+            # self.node.get_logger().warning("Observation Shape = {}".format(self.observation.shape), throttle_duration_sec=self.config.log.throttle_duration)
             self.node.get_logger().warning(
-                "Observation ({}) => \n goal: {} \n dist_to_goal: {} \n vel: {} \n agents: {} \n scan: {}".format(self.observation.shape, normalized_angle, dist_to_goal, vel, self.agents, scan), 
+                "Observation => \n goal: {} \n dist_to_goal: {} \n vel: {} \n agents: {}".format(goal, dist_to_goal, vel, self.agents), 
                 throttle_duration_sec=self.config.log.throttle_duration)
         
         return self.observation
-    
 
-    def _is_done(self, reward):
-        if(self.dist_to_goal() <= self.goal_radius):
-            self.steps_on_goal += 1
-            if self.steps_on_goal >= self.config.env.steps_on_goal_required:
-                return True
-        # else:
-        #     self.steps_on_goal = 0
+    def topk_nearest_points_from_scan(self, scan_ranges, angle_min=0.0, angle_max=2*math.pi, k=32, range_min=0.01, range_max=10.0):
+        """
+        scan_ranges : 1D numpy array of ranges (float). Invalids as 0 or np.inf or np.nan.
+        angle_min, angle_max : angular span of the scan (radians)
+        k : number of points to return
+        returns:
+            points: (k,2) array of (x,y) in robot frame
+            mask: (k,) boolean, True if point valid
+        """
+        # 1) sanitize
+        ranges = np.array(scan_ranges, dtype=np.float32).copy()
+        invalid_mask = (ranges <= 0) | np.isnan(ranges) | np.isinf(ranges)
+        ranges[invalid_mask] = range_max + 1.0  # mark invalid as far away
 
-        scan = np.array(self.scan[-self.scan_size:], dtype=np.float32)
-        scan = scan[(scan > 0) & np.isfinite(scan)]
-        min_scan_dist = np.min(scan) if scan.size > 0 else math.inf
+        # 2) angles
+        n = ranges.shape[0]
+        angle_inc = (angle_max - angle_min) / n
+        angles = angle_min + (np.arange(n) + 0.5) * angle_inc  # center of each beam
 
-        if(min_scan_dist <= self.robot_radius and min_scan_dist >= 0.02):
-            self.bump_num += 1
+        # 3) convert to cartesian
+        xs = ranges * np.cos(angles)
+        ys = ranges * np.sin(angles)
 
-        if(self.bump_num >= 3):
-            return True
+        # 4) compute distances and select top-k (closest)
+        dists = np.sqrt(xs*xs + ys*ys)
+        # argpartition is O(n) for K selection
+        idx = np.argpartition(dists, k-1)[:k]
+        # for determinism, sort selected indices by distance
+        idx = idx[np.argsort(dists[idx])]
 
-        if(self.num_iterations > self.max_iteration):
-            return True
+        # 5) build point array
+        points = np.stack([xs[idx], ys[idx]], axis=1)  # shape (k,2)
+        mask = dists[idx] <= range_max  # valid if within sensor range
 
-        return False
-    
+        # 6) if fewer than k valid needed, we still return k with padding done above (far points)
+        # Optionally: replace invalid points with a padding value
+        padding_val = range_max  # or np.nan
+        points[~mask] = np.array([padding_val, 0.0])
+
+        # 7) optionally normalize distances (example: divide by range_max)
+        # points[:,0] = points[:,0] / range_max
+        # points[:,1] = points[:,1] / range_max
+
+        return points.astype(np.float32), mask.astype(np.float32)
+
+
     def _compute_reward(self):
         """Calculates the reward to give based on the observations given.
         """
         # reward parameters:
-        r_backward = self.config.env.reward.backward
         r_arrival = self.config.env.reward.goal_arrival     #20 #15
         r_waypoint = self.config.env.reward.goal_waypoint   #5.0 #3.2 #2.5 #1.6 #2 #3 #1.6 #6 #2.5 #2.5
         r_collision = self.config.env.reward.collision      #-20 #-15
@@ -150,28 +174,24 @@ class MyEnv(ROSEnv):
         w_thresh = 1 # 0.7
 
         # reward parts:
-        r_b = self._backward_reward(r_backward, self.curr_vel.linear.x)
         r_g = self._goal_reached_reward(r_arrival, r_waypoint)
         r_c = self._obstacle_collision_punish(self.scan[-self.scan_size:], scan_penalty_threshold_factor, r_scan, r_collision)
         r_w = self._angular_velocity_punish(self.curr_vel.angular.z,  r_rotation, w_thresh)
         r_t = self._theta_reward(self.local_goal_from_robot, self.mht_peds, self.curr_vel.linear.x, r_angle, angle_thresh)
         r_h = self._human_reward(r_human)
-        reward = self.config.env.reward.constant + r_b + r_g + r_c + r_t + r_h #+ r_w #+ r_v # + r_p
+        reward = self.config.env.reward.constant + r_g + r_c + r_t + r_h #+ r_w #+ r_v # + r_p
         if self.dist_to_goal() < self.goal_radius*2:
             reward -= self.curr_vel.linear.x * 0.5
 
 
         if ((self.env_id_display_log == self.env_id or self.env_id_display_log == None)):
-            self.node.get_logger().warning("Compute reward done. \nreward = {}     total🪙 = {}\n    rb: {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, self.reward_episode, r_b, r_g, r_c, r_w, r_t, r_h)
+            self.node.get_logger().warning("Compute reward done. \nreward = {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, r_g, r_c, r_w, r_t, r_h)
                                            , throttle_duration_sec=self.config.log.throttle_duration
                                            )
             # self.node.get_logger().warning("Dist Goal Arr: \n{}   {}\n{}   {}".format(self.num_iterations, self.dist_to_goal_reg, self.curr_pose.position, self.final_goal)
             #                                , throttle_duration_sec=self.config.log.throttle_duration
             #                                )
         return reward
-
-    def _backward_reward(self, r_backward, v_x):
-        return -r_backward * min(0, v_x)
 
     def _goal_reached_reward(self, r_arrival, r_waypoint):
         """
@@ -189,7 +209,7 @@ class MyEnv(ROSEnv):
         reward = 0.0
 
         if(dist_to_goal <= self.goal_radius):
-            reward += r_arrival / max(1, self.config.env.steps_on_goal_required)
+            reward = r_arrival
         elif(self.num_iterations >= self.max_iteration):
         # elif(self.start_time < self.get_time() - self.max_time):
             reward = -r_arrival
@@ -232,7 +252,8 @@ class MyEnv(ROSEnv):
         # prefer goal theta:
         theta_pre = np.arctan2(goal.y, goal.x)
         d_theta = theta_pre
-        reward = r_angle*(angle_thresh - abs(d_theta)) * min(0, v_x / self.max_linear_velocity)
+        reward = r_angle*(angle_thresh - abs(d_theta))
+        reward = reward * (v_x / self.max_linear_velocity)
         return reward  
     
     def _human_reward(self, r_human):
@@ -250,15 +271,8 @@ class MyEnv(ROSEnv):
 
         return reward
     
-    def _post_information(self, done):
-        self.info = {
-            "goal": self.goal,
-            "current_pose": self.curr_pose
-            }
-        
-        if (done):
-            success = False
-            if(self.dist_to_goal() <= self.goal_radius):
-                success = True
-            self.info["is_success"] = success
-        return self.info
+    # def on_policy_update_start(self):
+    #     super().on_policy_update_start()
+
+    # def on_policy_update_end(self):
+    #     super().on_policy_update_end()

@@ -4,7 +4,7 @@ from math import cos, sin, atan2, sqrt
 from rclpy.node import Node
 from cnn_msgs.msg import CNNdata, MyCNNdata, AllCNNdata
 from geometry_msgs.msg import Point, Twist, Pose, PoseStamped
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 # from pedsim_msgs.msg import TrackedPersons
 from agents_msgs.msg import AgentArray, Agent
 from sensor_msgs.msg import LaserScan
@@ -35,6 +35,7 @@ class CnnDataNode(Node):
         self.scan_all_tmp = np.zeros(1080, dtype=np.float32)
         self.scan_buffer = []
 
+        self.global_path = Path()
         self.final_goal = PoseStamped()
         self.local_goal_from_robot = Point()
         self.local_goal_from_map = Point()
@@ -50,6 +51,7 @@ class CnnDataNode(Node):
         self.create_subscription(PoseStamped, 'robot_pose', self._robot_pose_callback, 1)
         self.create_subscription(AgentArray, 'agents', self.agents_callback, 10)
         self.create_subscription(LaserScan, 'scan', self.scan_callback, 10)
+        self.create_subscription(Path, 'global_path', self.global_path_callback, 10)
         self.create_subscription(Point, 'local_goal', self.goal_callback, 10)
         self.create_subscription(Point, 'local_goal_from_map', self.local_goal_from_map_callback, 1)
         self.create_subscription(Point, 'local_goal_from_robot', self.local_goal_from_robot_callback, 1)
@@ -118,7 +120,9 @@ class CnnDataNode(Node):
             self.agents.header = msg.header
             self.agents.agents = agents
 
-    
+    def global_path_callback(self, msg):
+        self.global_path = msg
+
     def local_goal_from_map_callback(self, msg):
         self.local_goal_from_map = msg
         
@@ -163,6 +167,7 @@ class CnnDataNode(Node):
             msg.scan = [float(v) for arr in self.scan_buffer for v in arr.tolist()]
             msg.scan_all = self.scan_all_tmp.tolist()
 
+            msg.global_path = self.global_path
             msg.global_goal = self.final_goal
             msg.local_goal_from_map = self.local_goal_from_map
             msg.local_goal_from_robot = self.local_goal_from_robot

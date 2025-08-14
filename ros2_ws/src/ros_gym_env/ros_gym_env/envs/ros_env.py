@@ -12,6 +12,7 @@ from geometry_msgs.msg import Point, Twist, Pose, PoseStamped
 from cnn_msgs.msg import CNNdata, MyCNNdata, AllCNNdata
 from agents_msgs.msg import AgentArray, Agent
 from sensor_msgs.msg import LaserScan
+from nav_msgs.msg import Odometry, Path
 from tf_transformations import euler_from_quaternion
 
 
@@ -40,6 +41,7 @@ class ROSEnv(gym.Env, ABC):
         self.max_angular_velocity = self.config.env.robot.max_angular_velocity
 
         # scan
+        self.raw_last_scan = None
         self.scan_history = self.config.env.obs.scan_history
         self.scan_buffer = []
 
@@ -51,21 +53,25 @@ class ROSEnv(gym.Env, ABC):
         # reset flag:
         self._reset = True
         self.curr_pose = None
-        
-        
 
+        self.ros_debug = self.config.log.ros
+        
         # === ROS ===
         self.node = Node("ros_env_" + str(self.env_id))
 
         self.node.create_subscription(PoseStamped, self.prefix + '/robot_pose', self._robot_pose_callback, 1)
         self.node.create_subscription(AgentArray, self.prefix + '/agents', self.agents_callback, 10)
         self.node.create_subscription(LaserScan, self.prefix + '/scan', self.scan_callback, 10)
+        self.node.create_subscription(Path, self.prefix + '/global_path', self.global_path_callback, 10)
         self.node.create_subscription(Point, self.prefix + '/local_goal', self.goal_callback, 10)
         self.node.create_subscription(Point, self.prefix + '/local_goal_from_map', self.local_goal_from_map_callback, 1)
         self.node.create_subscription(Point, self.prefix + '/local_goal_from_robot', self.local_goal_from_robot_callback, 1)
         self.node.create_subscription(PoseStamped, self.prefix + '/global_goal', self._final_goal_callback, 1)
         self.node.create_subscription(Twist, self.prefix + '/smooth_cmd_vel', self.vel_callback, 10)
         self.cmd_vel_publisher = self.node.create_publisher(Twist, self.prefix + self.config.env.ros.cmd_vel, 10)
+
+        if self.ros_debug:
+            self.debug_scan_pub = self.node.create_publisher(LaserScan, f"{self.prefix}/debug/scan", 10)
 
         # === Services ===
         self.reset_client = self.node.create_client(Reset, self.prefix + self.config.env.ros.reset_service)
@@ -78,6 +84,11 @@ class ROSEnv(gym.Env, ABC):
 
         self.set_action_space()
         self.set_observation_space()
+
+        req = PausePlay.Request()
+        req.play = True
+        future = self.play_client.call_async(req)
+        rclpy.spin_until_future_complete(self.node, future)
 
     # === ROS ===
 
@@ -127,6 +138,9 @@ class ROSEnv(gym.Env, ABC):
             self.agents[i] = (dx_local, dy_local, vx, vy, dist)
             # self.agents[i] = (dx_local, dy_local, vx_local, vy_local, dist)
 
+    def global_path_callback(self, msg):
+        self.global_path = msg
+
     def local_goal_from_map_callback(self, msg):
         self.local_goal_from_map = msg
         
@@ -137,14 +151,20 @@ class ROSEnv(gym.Env, ABC):
         self.final_goal = final_goal_msg.pose.position
 
     def scan_callback(self, msg: LaserScan):
+        self.raw_last_scan = msg
         scan = np.array(msg.ranges, dtype=np.float32)
-        scan[np.isnan(scan)] = 0.0
-        scan[np.isinf(scan)] = 0.0
-        scan_tmp = scan[0:720]
-        self.scan_buffer.append(scan_tmp.copy())
+        scan[np.isnan(scan)] = msg.range_max
+        scan[np.isinf(scan)] = msg.range_max
+        self.scan_buffer.append(scan.copy())
         if len(self.scan_buffer) >= self.scan_history:
             self.scan = [float(v) for arr in self.scan_buffer for v in arr.tolist()]
             self.scan_buffer = self.scan_buffer[1:]
+        
+        # scan_tmp = scan[0:720]
+        # self.scan_buffer.append(scan_tmp.copy())
+        # if len(self.scan_buffer) >= self.scan_history:
+        #     self.scan = [float(v) for arr in self.scan_buffer for v in arr.tolist()]
+        #     self.scan_buffer = self.scan_buffer[1:]
 
     def goal_callback(self, msg: Point):
         self.goal = msg
@@ -167,8 +187,10 @@ class ROSEnv(gym.Env, ABC):
         self.nb_slice = self.config.env.obs.scan_slice
         self.scan_history = self.config.env.obs.scan_history
         self.scan_tile = self.config.env.obs.scan_tile
-        self.scan_obs_size = int((self.scan_size/self.nb_slice)*self.scan_history*self.scan_tile)
-        self.scan_obs_size = int(self.scan_obs_size*2) if self.config.env.obs.scan_avg_min_pool else self.scan_obs_size
+        self.scan_obs_size = int(self.scan_size*self.scan_history*self.scan_tile)
+        size = int(self.config.env.obs.scan_avg_pool) + int(self.config.env.obs.scan_min_pool)
+        if size > 0:
+            self.scan_obs_size = int((self.scan_size / self.nb_slice) * self.scan_history * self.scan_tile * size)
 
 
         self.human_number = self.config.env.obs.human_number
@@ -176,7 +198,7 @@ class ROSEnv(gym.Env, ABC):
 
         obs_shape = 0
         if use_goal:
-            obs_shape += 2
+            obs_shape += 1 #2
         if use_goal_dist:
             obs_shape += 1
         if use_robot_velocity:
@@ -186,19 +208,30 @@ class ROSEnv(gym.Env, ABC):
         if use_human:
             obs_shape += self.human_obs_size
 
+        print(obs_shape)
         self.observation_space = gym.spaces.Box(low=-math.inf, high=math.inf, shape=(obs_shape,), dtype=np.float32)
 
     def set_action_space(self):
         self.high_action = np.array([1, 1])
         self.low_action = np.array([-1, -1])
-        self.action_space = gym.spaces.Box(low=self.low_action, high=self.high_action, dtype=np.float32)
+        if self.config.env.action.discrete:
+            import itertools
+
+            self.levels_lin = self.config.env.action.discrete_level_linear   # ex: -1.0, 0.0, 1.0
+            self.levels_ang = self.config.env.action.discrete_level_angular   # ex: -1.0, 0.0, 1.0
+            lin_vals = np.linspace(self.low_action[0], self.high_action[0], self.levels_lin)
+            ang_vals = np.linspace(self.low_action[1], self.high_action[1], self.levels_ang)
+            self.actions_list = [np.array(a) for a in itertools.product(lin_vals, ang_vals)]
+            self.action_space = gym.spaces.Discrete(len(self.actions_list))
+        else:
+            self.action_space = gym.spaces.Box(low=self.low_action, high=self.high_action, dtype=np.float32)
 
     def reset(self, *, seed=None, options=None, **kwargs):
         if seed is not None:
             np.random.seed(seed)
         self._set_init()
         obs = self._get_observation()
-        info = self._post_information()
+        info = self._post_information(False)
         return obs, info
     
     def _set_init(self):
@@ -206,6 +239,7 @@ class ROSEnv(gym.Env, ABC):
         self.cmd_vel_publisher.publish(Twist())
 
         self.num_iterations = 0
+        self.reward_episode = 0
         self._episode_done = False
         self.start_time = self.get_time()
 
@@ -254,6 +288,8 @@ class ROSEnv(gym.Env, ABC):
 
         step_time = time.time()
         time_tmp = time.time()
+        if self.config.env.action.discrete:
+            action = self.actions_list[action]
         self.send_action(action)
         action_time = time.time() - time_tmp
 
@@ -267,6 +303,7 @@ class ROSEnv(gym.Env, ABC):
 
         time_tmp = time.time()
         reward = self._compute_reward()
+        self.reward_episode += reward
         reward_time = time.time() - time_tmp
 
         done = self._is_done(reward)
@@ -274,12 +311,13 @@ class ROSEnv(gym.Env, ABC):
         self._reset = done
         truncated = False
 
-        # if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-        #     self.node.get_logger().fatal("\nStep Time: {}\n    action time: {}\n    spin time: {}\n    obs time: {}\n    reward time: {}".format(
-        #             time.time() - step_time, action_time, spin_time, obs_time, reward_time
-        #         ), 
-        #         throttle_duration_sec=self.config.log.throttle_duration)
-        return obs, reward, done, truncated, {}
+        info = self._post_information(done)
+
+        if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
+            if done:
+                self.node.get_logger().fatal(f"🪙 Episode Reward : {self.reward_episode}")
+
+        return obs, reward, done, truncated, info
 
     @abstractmethod
     def init_info(self):
@@ -292,67 +330,12 @@ class ROSEnv(gym.Env, ABC):
         """
         pass
 
+    @abstractmethod
     def _get_observation(self):
         """
         Returns the observation.
         """
-        obs = ()
-
-        # goal:
-        if self.config.env.obs.goal:
-            goal = np.array([
-                                self.local_goal_from_robot.x,
-                                self.local_goal_from_robot.y
-                            ], dtype=np.float32)
-            obs += (goal,)
-
-        if self.config.env.obs.goal_dist:
-            dist_to_goal = self.dist_to_goal()
-            obs += (dist_to_goal,)
-
-        # scan:
-        if self.config.env.obs.scan:
-            scan = np.array(self.scan, dtype=np.float32)
-            scan = scan.reshape(self.scan_history, self.scan_size, 1)
-
-            size_slice = int(self.scan_size/self.nb_slice)
-            scan = scan.reshape(self.scan_history, size_slice, self.nb_slice)
-            if self.config.env.obs.scan_avg_min_pool:
-                scan_min = np.min(scan, axis=2)
-                scan_mean = np.mean(scan, axis=2)
-                scan_avg = np.stack((scan_min, scan_mean), axis=1).reshape(2*self.scan_history, size_slice)
-                scan = scan_avg.reshape(2*self.scan_history*size_slice)
-            scan = np.tile(scan, self.scan_tile)
-            if self.config.env.obs.scan_norm:
-                s_min = 0
-                s_max = 10
-                scan = np.clip(scan, 0.0, 10.0)
-                scan = 2 * (scan - s_min) / (s_max - s_min) + (-1)
-            obs += (scan,)
-        
-        # vel:
-        if self.config.env.obs.robot_velocity:
-            vel = np.array([self.curr_vel.linear.x, self.curr_vel.angular.z], dtype=np.float32)
-            obs += (vel,)
-
-        # human:
-        if self.config.env.obs.human:
-            for agent in self.agents:
-                obs += (agent,)
-
-        # observation:
-        self.observation = np.concatenate((obs), axis=None)
-
-        if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            self.node.get_logger().warning("\n\n", throttle_duration_sec=self.config.log.throttle_duration)
-        #     self.node.get_logger().warning("Goal pos/dist: {} / {}".format(goal, dist_to_goal), throttle_duration_sec=self.config.log.throttle_duration)
-
-            # self.node.get_logger().warning("Observation Shape = {}".format(self.observation.shape), throttle_duration_sec=self.config.log.throttle_duration)
-            self.node.get_logger().warning(
-                "Observation => \n goal: {} \n dist_to_goal: {} \n vel: {} \n agents: {}".format(goal, dist_to_goal, vel, self.agents), 
-                throttle_duration_sec=self.config.log.throttle_duration)
-        
-        return self.observation
+        pass
     
     @abstractmethod
     def _compute_reward(self):
@@ -361,14 +344,52 @@ class ROSEnv(gym.Env, ABC):
         """
         pass
 
+    @abstractmethod
+    def _post_information(self, done):
+        pass
+
+
+    def publish_debug_scan_observation(self, scan):
+        scan_msg = LaserScan()
+        scan_ranges = scan[-self.scan_size:].tolist()
+
+        # === Entête ===
+        if self.raw_last_scan is not None:
+            scan_msg.header = self.raw_last_scan.header
+        else:
+            scan_msg.header.stamp = self.node.get_clock().now().to_msg()
+            scan_msg.header.frame_id = "env_" + str(self.env_id)+"/laser_link"
+
+        scan_msg.angle_min = 0.0
+        scan_msg.angle_max = 2 * math.pi
+        scan_msg.angle_increment = (scan_msg.angle_max - scan_msg.angle_min) / len(scan_ranges)
+
+        scan_msg.range_min = 0.0
+        scan_msg.range_max = 10.0
+
+        # === Données ===
+        scan_msg.ranges = scan_ranges
+
+        self.debug_scan_pub.publish(scan_msg)
 
     def dist_to_goal(self):
-        return np.linalg.norm(
-            np.array([
-                self.curr_pose.position.x - self.final_goal.x,
-                self.curr_pose.position.y - self.final_goal.y
-            ])
-        )
+        total_distance = 0.0
+        poses = self.global_path.poses
+
+        for i in range(len(poses) - 1):
+            x1 = poses[i].pose.position.x
+            y1 = poses[i].pose.position.y
+            z1 = poses[i].pose.position.z
+
+            x2 = poses[i+1].pose.position.x
+            y2 = poses[i+1].pose.position.y
+            z2 = poses[i+1].pose.position.z
+
+            # Distance Euclidienne entre deux points
+            dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
+            total_distance += dist
+
+        return total_distance
 
     def on_policy_update_start(self):
         req = PausePlay.Request()
@@ -381,13 +402,6 @@ class ROSEnv(gym.Env, ABC):
         req.play = False
         future = self.play_client.call_async(req)
         rclpy.spin_until_future_complete(self.node, future)
-
-    def _post_information(self):
-        self.info = {
-            "goal": self.goal,
-            "current_pose": self.curr_pose
-            }
-        return self.info
 
     def close(self):
         self.node.destroy_node()

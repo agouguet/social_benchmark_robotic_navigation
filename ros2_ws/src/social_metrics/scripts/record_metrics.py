@@ -12,6 +12,7 @@ import os
 from nav_msgs.msg import Path, Odometry
 from std_msgs.msg import Float32MultiArray, Float32
 from metric_msgs.msg import TrialInfo
+from geometry_msgs.msg import PoseStamped
 from simulation_msgs.msg import SceneInfo
 from agents_msgs.msg import AgentArray
 
@@ -50,13 +51,9 @@ class RecordMetrics(Node):
         self.name = f"{self.condition}-{ts}"
         self.filename = None
 
+        self.create_subscription(PoseStamped, "robot_pose", self.robot_position, 10)
         self.create_subscription(Odometry, "robot_odom", self.robot_position, 10)
-        self.create_subscription(TrialInfo, 'social_sim/metrics', self.trial_info_callback, 10)
-        self.create_subscription(AgentArray, 'social_sim/agents', self.human_position, 10)
-        self.create_subscription(SceneInfo, 'social_sim/scene_info', self.scene_info_callback, 10)
-        self.create_subscription(Path, 'move_base/GlobalPlanner/plan', self.global_plan_callback, 10)
-        self.create_subscription(Float32MultiArray, 'lifecycle_learner/attention_l', self.attention_l_callback, 10)
-        self.create_subscription(Float32MultiArray, 'lifecycle_learner/attention_cmd_vel', self.attention_cmd_vel_callback, 10)
+        self.create_subscription(AgentArray, 'agents', self.human_position, 10)
         
         self.headers = False
 

@@ -18,7 +18,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from ros_gym_env.envs.env_factory import *
 from ros_gym_env.envs.env_wrappers import *
 from ros_gym_env.policy.policy_factory import *
-from ros_gym_env.learning.curriculum import CurriculumManager, CurriculumCallback, PolicyUpdateCallback
+from ros_gym_env.learning.curriculum import CurriculumManager, CurriculumCallback, PolicyUpdateCallback, SuccessRateCallback
 
 
 
@@ -74,7 +74,8 @@ class RLTrainerNode(Node):
     def __init__(self):
         super().__init__('rl_trainer_node')
 
-        self.config_name = "training_002.yaml"
+        # self.config_name = "training_002.yaml"
+        self.config_name = "simple.yaml"
         # self.config_name = "drl-vo_training.yaml"
         self.config = load_ros2_package_config("ros_gym_env", "config/"+self.config_name)
         model_name = "model/"
@@ -148,13 +149,14 @@ class RLTrainerNode(Node):
 
         curriculum_callback = CurriculumCallback(self.curriculum, self.env, ros_node=self)
         policy_callback = PolicyUpdateCallback(ros_node=self)
+        success_callback = SuccessRateCallback()
 
         self.model.learn(
             total_timesteps=self.config.learning.total_timesteps,
             log_interval=log_interval,
             tb_log_name=name_log,
             reset_num_timesteps=not self.use_model,
-            callback=[checkpoint_callback, curriculum_callback, policy_callback] 
+            callback=[checkpoint_callback, curriculum_callback, policy_callback, success_callback] 
         )
         
         self.model.save("drl_vo_model")

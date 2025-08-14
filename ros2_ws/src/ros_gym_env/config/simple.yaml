@@ -1,11 +1,11 @@
 # Learning params
 learning:
-  total_timesteps: 50000000
+  total_timesteps: 100000000
   n_steps: 1024
-  learning_rate: 0.0003
+  learning_rate: 0.00005
   num_envs: 10
   speed_time: 1.0
-  save_model_frequency: 1000000
+  save_model_frequency: 10000000
   curriculum:
     max_level: 3
     window_size: 10
@@ -33,7 +33,9 @@ algo:
 
 # Policy network
 policy:
-  name: "mlagent"
+  name: "simple"
+  # name: "mlagent"
+  # name: "mlagent-discret"
   features_dim: 512
   pi_layers: [512, 256]
   vf_layers: [256, 128]
@@ -42,37 +44,46 @@ policy:
 # Environment observations
 env:
   # name: "test"
-  name: "closest_obstacles"
-  max_iteration: 5000
+  name: "myenv"
+  max_iteration: 50000
+  steps_on_goal_required: 1
   max_time: 90
   normalize_reward: False #True
   normalize_observation: False
+
+  action:
+    discrete: false
+    discrete_level_linear: 5
+    discrete_level_angular: 5
 
   obs:
     goal: true
     goal_dist: true
     scan: true
-    scan_dim: 128
-    scan_history: 5
-    scan_slice: 4 
+    scan_dim: 720
+    scan_history: 1
+    scan_slice: 8
     scan_tile: 1
-    scan_avg_min_pool: true #true
-    scan_norm: false #true
-    robot_velocity: true
+    scan_avg_pool: false #true
+    scan_min_pool: true
+    scan_norm: true #true
+    robot_velocity: false #true
     human: true
     human_number: 10
     
 
   reward:
-    constant: -0.01
-    goal_arrival: 20
+    constant: -0.00 #-0.01
+    backward: -0.2
+    goal_arrival: 100
+    goal_stay_bonus: 10.0
     goal_waypoint: 5.0
     goal_radius: 0.2
     goal_dist_history_number: 10
-    collision: -20
-    scan: -0.2
-    scan_penalty_threshold_factor: 1.5
-    theta_angle: 0.0 #0.2
+    collision: -100
+    scan: -1.5 #-0.2
+    scan_penalty_threshold_factor: 2.0
+    theta_angle: 0.2
     rotation: -0.1
     human: 1.0
     human_personal_distance: 1.0

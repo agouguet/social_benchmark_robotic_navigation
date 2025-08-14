@@ -5,6 +5,7 @@ float32[] scan	  	# 720 range data from the laser scan
 float32[] scan_all	# 1080 range data from the laser scan
 
 # GOAL
+nav_msgs/Path global_path
 geometry_msgs/PoseStamped global_goal
 geometry_msgs/Point     local_goal_from_map
 geometry_msgs/Point     local_goal_from_robot

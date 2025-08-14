@@ -22,7 +22,7 @@ from threading import Event
 
 
 
-class MyEnv(ROSEnv):
+class HBSNEnv(ROSEnv):
     def __init__(self, env_id, config, env_id_display_log=None):
         super().__init__(env_id, config, env_id_display_log)
 
@@ -114,8 +114,8 @@ class MyEnv(ROSEnv):
             self.steps_on_goal += 1
             if self.steps_on_goal >= self.config.env.steps_on_goal_required:
                 return True
-        # else:
-        #     self.steps_on_goal = 0
+        else:
+            self.steps_on_goal = 0
 
         scan = np.array(self.scan[-self.scan_size:], dtype=np.float32)
         scan = scan[(scan > 0) & np.isfinite(scan)]
@@ -162,7 +162,7 @@ class MyEnv(ROSEnv):
 
 
         if ((self.env_id_display_log == self.env_id or self.env_id_display_log == None)):
-            self.node.get_logger().warning("Compute reward done. \nreward = {}     total🪙 = {}\n    rb: {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, self.reward_episode, r_b, r_g, r_c, r_w, r_t, r_h)
+            self.node.get_logger().warning("Compute reward done. \nreward = {}\n    rb: {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, r_b, r_g, r_c, r_w, r_t, r_h)
                                            , throttle_duration_sec=self.config.log.throttle_duration
                                            )
             # self.node.get_logger().warning("Dist Goal Arr: \n{}   {}\n{}   {}".format(self.num_iterations, self.dist_to_goal_reg, self.curr_pose.position, self.final_goal)
@@ -189,7 +189,9 @@ class MyEnv(ROSEnv):
         reward = 0.0
 
         if(dist_to_goal <= self.goal_radius):
-            reward += r_arrival / max(1, self.config.env.steps_on_goal_required)
+            reward = r_arrival
+            if self.steps_on_goal > 0:
+                reward += self.steps_on_goal * self.config.env.reward.goal_stay_bonus
         elif(self.num_iterations >= self.max_iteration):
         # elif(self.start_time < self.get_time() - self.max_time):
             reward = -r_arrival

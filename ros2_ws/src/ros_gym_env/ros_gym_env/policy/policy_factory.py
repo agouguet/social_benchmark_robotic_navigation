@@ -1,8 +1,8 @@
 from ros_gym_env.policy.drl_vo_cnn import DRL_VO_CNN
 # from ros_gym_env.policy.srnn_old import SRNN_OLD
 # from ros_gym_env.policy.srnn import SRNN
-from ros_gym_env.policy.simple_policies import Scan1DCNN, SCAN2DCNN
-from ros_gym_env.policy.mlagent_policy import MLAgentPolicy, MLAgentFeatureExtractor
+from ros_gym_env.policy.simple_policies import SimplePolicy, MultiModalFeatureExtractor
+from ros_gym_env.policy.mlagent_policy import MLAgentPolicy, MLAgentPolicyDiscrete, MLAgentFeatureExtractor
 import torch.nn as nn
 
 def get_activation_fn(name):
@@ -43,8 +43,8 @@ def none_policy():
     return None
 
 method_factory['none'] = Method("MlpPolicy", None)
-method_factory['scan'] = Method("CnnPolicy", Scan1DCNN)
-method_factory['scan2d'] = Method("CnnPolicy", SCAN2DCNN)
+method_factory['simple'] = Method(SimplePolicy, MultiModalFeatureExtractor)
 method_factory['drl-vo'] = Method("CnnPolicy", DRL_VO_CNN)
 method_factory['mlagent'] = Method(MLAgentPolicy, MLAgentFeatureExtractor)
+method_factory['mlagent-discret'] = Method(MLAgentPolicyDiscrete, MLAgentFeatureExtractor)
 # method_factory['srnn'] = SRNN_OLD
