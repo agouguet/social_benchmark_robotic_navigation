@@ -1,184 +1,182 @@
-import heapq
-import time
-from matplotlib import pyplot as plt
-from shapely import MultiPolygon
-import os, sys, math, random, copy, yaml, cv2, warnings, pickle, numpy as np, networkx as nx
-from scipy.spatial import distance
-
-from hbsn.mdp.State import State
-from concurrent.futures import ThreadPoolExecutor
+import math
+import random
+import numpy as np
+from typing import List, Tuple, Optional
 
 LIMIT_DISTANCE_TO_OTHER_AGENT = 0.6
 
-def random_function(mdp, state):
-    return random.choice(mdp.get_actions(state))
+def _to_np_points(pts, dtype=np.float32):
+    if not pts:
+        return np.empty((0, 2), dtype=dtype)
+    arr = np.asarray(pts, dtype=dtype)
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise ValueError("Chaque point doit être de forme (x, y).")
+    return arr
 
-def astar(start, goal, mdp, limited_action_of_start_state=None):
+def _pairwise_min_dist(actions_np: np.ndarray, points_np: np.ndarray, chunk_size: int = 4096) -> np.ndarray:
+    """
+    Pour chaque action (N,2), renvoie la distance minimale à l'ensemble points (M,2),
+    en traitant par blocs pour limiter l'utilisation mémoire.
+    """
+    N = actions_np.shape[0]
+    out = np.full(N, np.inf, dtype=np.float32)
+    if points_np.size == 0:
+        return out
 
-    def heuristic(cell1, cell2):
-        if cell1 in mdp.polygons and cell2 in mdp.polygons:
-            a = mdp.polygons[cell1].polygon.centroid
-            b = mdp.polygons[cell2].polygon.centroid
-            return a.distance(b)
-        return math.inf
+    # On découpe les points (M,2) en colonnes de blocs
+    M = points_np.shape[0]
+    for start in range(0, M, chunk_size):
+        end = min(start + chunk_size, M)
+        blk = points_np[start:end]  # (B,2)
+        # distances pour toutes les actions vers ce bloc: (N,B)
+        # ||a - b|| = sqrt(sum((a-b)^2, axis=2))
+        d = actions_np[:, None, :] - blk[None, :, :]
+        d = np.sqrt(np.sum(d * d, axis=2), dtype=np.float32)
+        # min sur l'axe des points du bloc
+        out = np.minimum(out, np.min(d, axis=1))
+    return out
 
-    open_set = []
-    heapq.heappush(open_set, (0, start.robot))
-    came_from = {}
-    g_score = {start.robot: 0}
-    f_score = {start.robot: heuristic(start.robot, goal)}
+def _normalize_inverse_distance(d: np.ndarray) -> np.ndarray:
+    """
+    Transforme une distance par une normalisation min-max inversée:
+      score = 1 - (d - dmin) / (dmax - dmin)
+    Cas dégénéré (dmax == dmin): on renvoie 1.0.
+    """
+    if d.size == 0:
+        return d
+    dmin = d.min()
+    dmax = d.max()
+    if not np.isfinite(dmin) or not np.isfinite(dmax) or dmax == dmin:
+        return np.ones_like(d, dtype=np.float32)
+    return 1.0 - (d - dmin) / (dmax - dmin)
 
-    while open_set:
-        _, current = heapq.heappop(open_set)
+def heuristic_score_based(
+    robot: Tuple[float, float],
+    goal: Tuple[float, float],
+    actions: List[Tuple[float, float]],
+    previous_path: Optional[List[Tuple[float, float]]] = None,
+    humans: Optional[List[Tuple[float, float]]] = None,
+    future_humans: Optional[List[List[Tuple[float, float]]]] = None,
+    *,
+    w1: float = 1.0,    # poids dg (proximité du but)
+    w2: float = 3.0,    # poids dnear (distance aux agents)
+    w3: float = 0.1,    # poids dm (coût du mouvement)
+    w4: float = 0.5,    # poids do (orientation par rapport à l'humain le + proche)
+    w5: float = 1.0,    # poids dp (éloignement du chemin précédent)
+    limit: float = LIMIT_DISTANCE_TO_OTHER_AGENT,
+    k: float = 0.5,     # pénalisation par l'écart-type
+    alpha: float = 0.8, # paramètre de l'atténuation dnear
+    chunk_size: int = 4096,
+    rng: Optional[random.Random] = None,
+    return_debug: bool = False,
+):
+    """
+    Version entièrement vectorisée. Retourne la meilleure action (x, y).
+    Si return_debug=True, retourne aussi un dict avec tous les vecteurs de scores.
+    """
+    if rng is None:
+        rng = random
 
-        if current == goal:
-            # Reconstruire le chemin
-            path = []
-            while current in came_from:
-                path.append(current)
-                current = came_from[current]
-            path.append(start.robot)
-            path.reverse()
-            return path
+    actions_np = _to_np_points(actions)              # (N,2)
+    if actions_np.shape[0] == 0:
+        return None if not return_debug else (None, {})
 
-        actions = mdp.get_actions(State(current,start.humans))
-        if limited_action_of_start_state is not None and current == start.robot:
-            actions = limited_action_of_start_state
-        
-        for neighbor in actions:
-            tentative_g_score = g_score[current] + 1
-            if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
-                came_from[neighbor] = current
-                g_score[neighbor] = tentative_g_score
-                f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal)
-                heapq.heappush(open_set, (f_score[neighbor], neighbor))
-    return None  # Aucun chemin trouvé
+    robot_np = np.asarray(robot, dtype=np.float32)   # (2,)
+    goal_np  = np.asarray(goal, dtype=np.float32)    # (2,)
 
-def closest_to_goal(mdp, state, goal, limited_action_of_start_state=None):
-    astar_path = astar(state, goal, mdp, limited_action_of_start_state=limited_action_of_start_state)
-    if astar_path is not None:
-        return astar_path[1]
-    return state.robot
+    prev_np  = _to_np_points(previous_path or [])
+    humans_np = _to_np_points(humans or [])
+    # Aplatissement des futures positions des humains
+    if future_humans:
+        flat_future = [pt for traj in future_humans for pt in traj]
+    else:
+        flat_future = []
+    future_np = _to_np_points(flat_future)
 
-def heuristic_score_based(mdp, state, goal=None, previous_path=[], w1=1.0, w2=3.0, w3=0.1, w4=0.5, w5=1.0, limit=LIMIT_DISTANCE_TO_OTHER_AGENT, actions=None):
-    goal = mdp.goal if goal is None else goal
-    if state.robot == mdp.get_state_from_continuous_position(goal):
-        return state.robot
-    
-    actions = mdp.get_actions(state)
+    # 1) Distances de performance (dm: robot->action, dg: goal->action)
+    dm = np.linalg.norm(actions_np - robot_np[None, :], axis=1).astype(np.float32)  # (N,)
+    dg = np.linalg.norm(actions_np - goal_np[None, :], axis=1).astype(np.float32)   # (N,)
+    dm_score = _normalize_inverse_distance(dm)  # plus petit déplacement -> meilleur score
+    dg_score = _normalize_inverse_distance(dg)  # plus proche du but -> meilleur score
 
-    if len(state.humans) == 0:
-        cell_goal = mdp.get_state_from_continuous_position(goal)
-        return closest_to_goal(mdp, state, cell_goal)
-    
-    def score_of_movement_and_goal_and_path(state, action, previous_path):
-        # actions = mdp.get_actions(state)
-        robot_pos = mdp.polygons[state.robot].polygon.centroid
-        dg_dict = {}
-        dm_dict = {}
-        dp_dict = {}
-        for act in actions:
-            dm_dict[act] = robot_pos.distance(mdp.polygons[act].polygon.centroid)
-            dg_dict[act] = goal.distance(mdp.polygons[act].polygon.centroid)
-            dp_dict[act] = min([point.distance(mdp.polygons[act].polygon.centroid) for point in previous_path], default=1.0)
+    # 2) Distance au chemin précédent (dp: éloignement du chemin)
+    if prev_np.shape[0] > 1:
+        dp_dist = _pairwise_min_dist(actions_np, prev_np, chunk_size=chunk_size)  # (N,)
+        dp_score = _normalize_inverse_distance(dp_dist)  # plus loin du chemin -> meilleur score (comme original)
+    else:
+        dp_score = np.ones(actions_np.shape[0], dtype=np.float32)
 
-        min_dm = min(dm_dict.values())
-        max_dm = max(dm_dict.values())
-        dm = 1 - (dm_dict[action]-min_dm)/(max_dm-min_dm)
+    # 3) Proximité aux agents (dnear)
+    # Combine humains actuels + futurs
+    agents_np = np.vstack([x for x in (humans_np, future_np) if x.size > 0]) if (humans_np.size or future_np.size) else np.empty((0, 2), dtype=np.float32)
+    if agents_np.size > 0:
+        dist_agents = _pairwise_min_dist(actions_np, agents_np, chunk_size=chunk_size)  # (N,)
+        # mapping non linéaire comme dans ton code:
+        # dnear = 1 si dist >= limit, sinon dist/limit * exp(-alpha * (limit - dist)^2)
+        dnear = np.where(dist_agents >= limit, 1.0, (dist_agents / limit) * np.exp(-alpha * (limit - dist_agents) ** 2)).astype(np.float32)
+    else:
+        dnear = np.ones(actions_np.shape[0], dtype=np.float32)
 
-        min_dg = min(dg_dict.values())
-        max_dg = max(dg_dict.values())
-        dg = 1 - (dg_dict[action]-min_dg)/(max_dg-min_dg)
+    # 4) Orientation par rapport à l'humain le plus proche du robot (do)
+    #    On garde la même logique: si pas d'humains -> 0.0
+    if humans_np.shape[0] == 0:
+        do = np.zeros(actions_np.shape[0], dtype=np.float32)
+    else:
+        # trouver l'humain le plus proche du robot
+        vec_rh = humans_np - robot_np[None, :]           # (H,2)
+        dist_rh = np.linalg.norm(vec_rh, axis=1)         # (H,)
+        idx_closest = int(np.argmin(dist_rh))
+        h = humans_np[idx_closest]                       # (2,)
 
+        # v1 = robot->humain, v2 = robot->action (vectorisé)
+        v1 = h - robot_np                                # (2,)
+        v2 = actions_np - robot_np[None, :]              # (N,2)
 
-        dp = 1.0
-        if len(previous_path) > 1:
-            min_dp = min(dp_dict.values())
-            max_dp = max(dp_dict.values())
-            dp = 1 - (dp_dict[action]-min_dp)/(max_dp-min_dp)
+        # produit scalaire -> humain pas derrière ?
+        dot = v2 @ v1  # (N,)
+        is_not_behind = (dot > 0).astype(np.float32)
 
-        return dm, dg, dp
+        # produit vectoriel 2D (z-component)
+        # cross = (hx - rx)*(ay - ry) - (hy - ry)*(ax - rx)
+        cross = (h[0] - robot_np[0]) * (v2[:, 1]) - (h[1] - robot_np[1]) * (v2[:, 0])
 
-    def score_from_closest_agent(state, action):
-        """ Calcule la distance minimale entre l'action du robot et les humains actuels et futurs en une seule passe. """
-        action_pos = mdp.polygons[action].polygon.centroid
-        min_heap = []  # Utilisation d'un tas pour suivre les plus petites distances
-        action_xy = np.array([action_pos.x, action_pos.y])
+        do = np.where(
+            cross == 0.0,
+            0.0,
+            np.where(cross > 0.0, 0.9 * is_not_behind, 1.0 * is_not_behind)
+        ).astype(np.float32)
 
-        for human in state.humans:
-            heapq.heappush(min_heap, human.position.distance(action_pos))  # Distance actuelle
-            
-            # Vectorisation des distances futures avec numpy si possible
-            if hasattr(human, "future_predicted_position") and human.future_predicted_position:
-                future_positions = np.array([(pos.x, pos.y) for pos in human.future_predicted_position])
-                distances = np.linalg.norm(future_positions - action_xy, axis=1)
-                heapq.heappush(min_heap, np.min(distances))  # Plus courte distance future
+    # 5) Agrégation avec pénalisation par l'écart-type
+    w = np.array([w1, w2, w3, w4, w5], dtype=np.float32)
+    # Empilement des composantes pour calcul par action
+    comps = np.vstack([dg_score, dnear, dm_score, do, dp_score]).astype(np.float32)  # shape (5, N)
 
-        return heapq.heappop(min_heap) if min_heap else math.inf
+    # moyennes et variances pondérées par action
+    sumw = w.sum()
+    mean = (w[:, None] * comps).sum(axis=0) / sumw
+    var = (w[:, None] * (comps - mean[None, :]) ** 2).sum(axis=0) / sumw
+    std = np.sqrt(var, dtype=np.float32)
 
+    score = mean - k * std
 
-    def score_for_direction_passage_with_humans(state, action):
-        if len(state.humans) == 0:
-            return 0.0
-        
-        p1 = mdp.polygons[state.robot].polygon.centroid
-        p3 = mdp.polygons[action].polygon.centroid
+    # 6) Sélection de la/les meilleure(s) action(s)
+    max_val = np.max(score)
+    idxs = np.flatnonzero(np.isclose(score, max_val))
+    idx = int(rng.choice(idxs)) if idxs.size > 1 else int(idxs[0])
+    best_action = tuple(map(float, actions_np[idx]))
 
-        closest_human = None
-        dist = math.inf
-        for human in state.humans:
-            dist_robot_human = human.position.distance(p1)
-            if dist_robot_human < dist:
-                dist = dist_robot_human
-                closest_human = human
-        p2 = closest_human.position
+    if not return_debug:
+        return best_action
 
-        # Vecteurs
-        v1 = (p2.x - p1.x, p2.y - p1.y)  # Robot → Humain
-        v2 = (p3.x - p1.x, p3.y - p1.y)  # Robot → Destination
-
-        # Produit scalaire
-        dot_product = v1[0] * v2[0] + v1[1] * v2[1]
-        is_human_not_behind = dot_product > 0
-
-        # Produit vectoriel
-        x1, y1 = p1.x, p1.y
-        x2, y2 = p2.x, p2.y
-        x3, y3 = p3.x, p3.y
-        cross_product = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
-        
-        if cross_product == 0:
-            return 0.0
-        elif cross_product > 0:
-            return 0.9 * is_human_not_behind
-        else:
-            return 1.0 * is_human_not_behind
-
-    def standard_deviation(state, action, k=0.5, alpha=0.8):
-        # PERFORMANCE 
-        dm, dg, dp = score_of_movement_and_goal_and_path(state, action, previous_path)
-
-        # SOCIAL 
-        dist = score_from_closest_agent(state, action)
-        dnear = np.where(dist >= limit, 1.0, dist/limit * np.exp(-alpha*(limit-dist)**2))
-        do = score_for_direction_passage_with_humans(state, action)
-
-        sum_weighted_score = w1*dg + w2*dnear + w3*dm + w4*do + w5*dp
-        mean = sum_weighted_score/(w1+w2+w3+w4+w5)
-        weighted_variance = (w1*(dg-mean)**2 + w2*(dnear-mean)**2 + w3*(dm-mean)**2 + w4*(do-mean)**2 + w5*(dp-mean)**2)/(w1+w2+w3+w4+w5)
-        weighted_standard_deviation = round(math.sqrt(weighted_variance), 3)
-        score = round(mean - k*weighted_standard_deviation, 3)
-
-        return score
-
-    max_actions = []
-    max_value = float("-inf")
-    for action in actions:
-        value = round(standard_deviation(state, action), 3)
-        if value > max_value:
-            max_actions = [action]
-            max_value = value
-        elif value == max_value:
-            max_actions += [action]
-    result = random.choice(max_actions)
-    return result
+    debug = {
+        "index": idx,
+        "action": actions,
+        "score_max": float(max_val),
+        "scores": score,
+        "dg_score": dg_score,
+        "dnear": dnear,
+        "dm_score": dm_score,
+        "do": do,
+        "dp_score": dp_score,
+    }
+    return best_action, debug

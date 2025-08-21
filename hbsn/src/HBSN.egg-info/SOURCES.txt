@@ -1,4 +1,3 @@
-.gitignore
 README.md
 pyproject.toml
 src/__init__.py
