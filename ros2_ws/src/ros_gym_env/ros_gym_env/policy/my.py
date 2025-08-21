@@ -8,29 +8,31 @@ class Swish(nn.Module):
     def forward(self, x):
         return x * th.sigmoid(x)
 
-class MultiModalFeatureExtractor(BaseFeaturesExtractor):
+class MyFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=512, config=None):
         super().__init__(observation_space, features_dim)
         self.config = config
 
+        # Dimensions robot / goal
         self.goal_size = 1 + int(self.config.env.obs.goal_dist)
         self.vel_size = 2 if self.config.env.obs.robot_velocity else 0
         self.robot_obs_size = self.goal_size + self.vel_size
-        self.human_size = 5 * self.config.env.obs.human_number if self.config.env.obs.human else 0 # si human_number agents
 
-        # Dimensions supposées (à adapter selon ton env)
+        # Humans
+        self.human_size = 5
+        self.N = self.config.env.obs.human_number if self.config.env.obs.human else 0
+
+        # Scan
         self.scan_size = self.config.env.obs.scan_dim
         self.nb_slice = self.config.env.obs.scan_slice
         self.scan_history = self.config.env.obs.scan_history
         self.scan_tile = self.config.env.obs.scan_tile
-        # taille du scan brute en entrée
         self.scan_obs_size = int(self.scan_size * self.scan_history * self.scan_tile)
         size = int(self.config.env.obs.scan_avg_pool) + int(self.config.env.obs.scan_min_pool)
         if size > 0:
             self.scan_obs_size = int((self.scan_size / self.nb_slice) * self.scan_history * self.scan_tile * size)
-        
 
-        # CNN pour le scan
+        # ---------------- Scan CNN ----------------
         self.scan_net = nn.Sequential(
             nn.Conv1d(1, 16, kernel_size=5, stride=2, padding=2),
             Swish(),
@@ -38,36 +40,40 @@ class MultiModalFeatureExtractor(BaseFeaturesExtractor):
             Swish(),
         )
 
-        self.human_mlp = nn.Sequential(
-            nn.Linear(5, 32),
-            Swish(),
-            nn.Linear(32, 32),
-            Swish()
-        )
-
-        # Calcul dynamique de la taille après conv
         with th.no_grad():
             dummy_input = th.zeros(1, 1, self.scan_obs_size)
             dummy_out = self.scan_net(dummy_input)
-            conv_output_size = dummy_out.numel()  # total features après flatten
+            conv_output_size = dummy_out.numel()
 
         self.scan_fc = nn.Sequential(
             nn.Linear(conv_output_size, 256),
             Swish()
         )
 
-        # MLP pour les autres features concaténées
-        self.other_fc = nn.Sequential(
-            nn.Linear(self.goal_size + self.vel_size, 256),
+        # ---------------- Humans MLP + Transformer ----------------
+        self.human_mlp = nn.Sequential(
+            nn.Linear(self.human_size, 32),
             Swish(),
-            nn.Linear(256, 256),
-            Swish(),
+            nn.Linear(32, 32),
+            Swish()
         )
 
-        # FC final
-        self.final_fc = nn.Sequential(
-            nn.Linear(256 + 256 + 32, features_dim),
+        encoder_layer = nn.TransformerEncoderLayer(d_model=32, nhead=4, batch_first=True)
+        self.human_transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.human_attention = nn.Linear(32, 1)
+
+        # ---------------- Robot MLP ----------------
+        self.robot_fc = nn.Sequential(
+            nn.Linear(self.robot_obs_size, 32),
             Swish(),
+            nn.Linear(32, 32),
+            Swish()
+        )
+
+        # ---------------- Final FC ----------------
+        self.final_fc = nn.Sequential(
+            nn.Linear(256 + 32 + 32, features_dim),
+            Swish()
         )
 
     def forward(self, observations):
@@ -76,30 +82,31 @@ class MultiModalFeatureExtractor(BaseFeaturesExtractor):
         robot = observations[:, self.scan_obs_size:self.scan_obs_size + self.robot_obs_size]
         humans = observations[:, self.scan_obs_size + self.robot_obs_size:]
 
-        # CNN scan
-        x_scan = scan.unsqueeze(1)  # (batch, channel=1, scan_size)
+        # ---- Scan branch ----
+        x_scan = scan.unsqueeze(1)  # (batch, 1, scan_size)
         x_scan = self.scan_net(x_scan)
-        # print("Shape after conv:", x_scan.shape)
         x_scan = x_scan.flatten(start_dim=1)
-        # print("Shape after flatten:", x_scan.shape)
         x_scan = self.scan_fc(x_scan)
 
-        # humans = observations[:, human_start:human_end].view(batch, N, 5)
-        N = self.config.env.obs.human_number
-        humans = humans.view(-1, N, 5)  # batch, N, features_par_humain
-        human_features = self.human_mlp(humans)  # (batch, N, 32)
-        human_features = human_features.mean(dim=1)  # pooling
+        # ---- Humans branch ----
+        humans = humans.view(-1, self.N, self.human_size)  # (batch, N, 5)
+        h = self.human_mlp(humans)  # (batch, N, 32)
+        h = self.human_transformer(h)  # (batch, N, 32)
+        # Attention pooling
+        attn_weights = F.softmax(self.human_attention(h), dim=1)  # (batch, N, 1)
+        x_humans = (h * attn_weights).sum(dim=1)  # (batch, 32)
 
-        # MLP autres
-        x_other = self.other_fc(robot)
+        # ---- Robot branch ----
+        x_robot = self.robot_fc(robot)  # (batch, 32)
 
-        # concat final
-        x = th.cat([x_scan, x_other, human_features], dim=1)
+        # ---- Fusion ----
+        x = th.cat([x_scan, x_humans, x_robot], dim=1)
         x = self.final_fc(x)
+
         return x
 
 
-class SimplePolicy(ActorCriticPolicy):
+class MyPolicy(ActorCriticPolicy):
     def __init__(self, observation_space, action_space, lr_schedule, **kwargs):
         super().__init__(
             observation_space,

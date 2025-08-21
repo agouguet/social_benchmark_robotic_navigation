@@ -12,16 +12,22 @@ learning:
     window_size: 10
     epsilon: 0.5
     patience: 5
-    thresholds:         # seulement utile si mode = steps ou time
+    thresholds:
       - [0, 1000000, 0]
-      - [1000000, 5000000, 1]
-      - [5000000, 20000000, 2]
-      # - [6000000, 10000000, 3]
+      - [1000000, 2000000, 1]
+      - [2000000, 3000000, 2]
+      - [3000000, 10000000, 3]
     level:
       # [name_dataset, min_human, max_human]
-      - ["all_scenario", 0, 0]
-      - ["all_scenario", 0, 1]
-      - ["all_scenario", 1, 1]
+      # - ["crowd/circle", 0, 0]
+      # - ["crowd/circle", 0, 2]
+      # - ["crowd/circle", 0, 5]
+      # - ["crowd/circle", 2, 10]
+
+      - ["all_scenario/easy", 0, 0]
+      - ["all_scenario/easy", 0, 1]
+      - ["all_scenario/easy", 0, 3]
+      - ["all_scenario/easy", 0, 5]
     # learning_rate_per_level:
     #   "0": 0.00003
     #   "1": 0.00002
@@ -40,7 +46,7 @@ log:
 algo:
   name: "ppo"
   clip_range: 0.2
-  batch_size: 1024        # Plus stable si assez de RAM
+  batch_size: 256        # Plus stable si assez de RAM
   n_epochs: 10            # Plus d'apprentissage si environnement stable
   vf_coef: 0.5
   ent_coef: 0.005         # Réduit un peu l'exploration
@@ -49,9 +55,8 @@ algo:
 
 # Policy network
 policy:
-  name: "simple"
-  # name: "mlagent"
-  # name: "mlagent-discret"
+  name: "mygraphv2"
+  # name: "my"
   features_dim: 512
   pi_layers: [512, 256]
   vf_layers: [256, 128]
@@ -59,9 +64,8 @@ policy:
 
 # Environment observations
 env:
-  # name: "test"
-  name: "myenv"
-  max_iteration: 50000
+  name: "hbsn"
+  max_iteration: 20000
   steps_on_goal_required: 1
   max_time: 90
   normalize_reward: False #True
@@ -74,18 +78,20 @@ env:
 
   obs:
     goal: true
-    goal_dist: true
+    goal_social: true
+    goal_dist: false
     scan: true
     scan_dim: 720
     scan_history: 1
-    scan_slice: 8
+    scan_slice: 16
     scan_tile: 1
     scan_avg_pool: false #true
     scan_min_pool: true
     scan_norm: true #true
-    robot_velocity: false #true
+    robot_velocity: true
     human: true
-    human_number: 1
+    human_number: 10
+    human_history: 1
     
 
   reward:
@@ -101,13 +107,13 @@ env:
     scan_penalty_threshold_factor: 2.0
     theta_angle: 0.2
     rotation: -0.1
-    human: 1.0
+    human: 10.0
     human_personal_distance: 1.0
 
   robot:
     robot_radius: 0.35
     min_linear_velocity: 0.0
-    max_linear_velocity: 0.5
+    max_linear_velocity: 1.0
     min_angular_velocity: -2.0
     max_angular_velocity: 2.0
 

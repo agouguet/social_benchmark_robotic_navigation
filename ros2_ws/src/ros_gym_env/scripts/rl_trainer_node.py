@@ -1,93 +1,44 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import os, yaml, glob
+import os, yaml
 import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 
 
-from stable_baselines3 import PPO, SAC, DDPG
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.utils import get_schedule_fn
 from stable_baselines3.common.vec_env import VecNormalize
 from stable_baselines3.common.callbacks import CheckpointCallback
 
-# from ros_gym_env.ros_gym_env.envs.ros_unity_gym_env_old import RosUnityEnvOld
 from ros_gym_env.envs.env_factory import *
 from ros_gym_env.envs.env_wrappers import *
 from ros_gym_env.policy.policy_factory import *
-from ros_gym_env.learning.curriculum import CurriculumManager, CurriculumCallback, PolicyUpdateCallback, SuccessRateCallback
+from ros_gym_env.learning.callback import PolicyUpdateCallback, SuccessRateCallback
 
+from ros_gym_env.learning.curriculum.callback import CurriculumCallback
+from ros_gym_env.learning.curriculum.manager import CurriculumManager
+from ros_gym_env.learning.curriculum.wrapper import RewardTrackingVecWrapper
 
-
-class Config:
-    def __init__(self, d):
-        for k, v in d.items():
-            if isinstance(v, dict):
-                v = Config(v)
-            setattr(self, k, v)
-
-    def to_dict(self):
-        result = {}
-        for k, v in self.__dict__.items():
-            if isinstance(v, Config):
-                result[k] = v.to_dict()
-            else:
-                result[k] = v
-        return result
-
-
-def get_latest_log_dir(base_dir, name_log):
-        """
-        Retourne le dernier dossier créé correspondant à base_dir/name_log*
-        """
-        pattern = os.path.join(base_dir, f"{name_log}*")
-        dirs = [d for d in glob.glob(pattern) if os.path.isdir(d)]
-        if not dirs:
-            return os.path.join(base_dir, name_log)  # dossier de base
-        latest_dir = max(dirs, key=os.path.getmtime)
-        return latest_dir
-
-
-def load_ros2_package_config(package_name, relative_path):
-    pkg_path = get_package_share_directory(package_name)
-    config_path = os.path.join(pkg_path, relative_path)
-    with open(config_path, "r") as f:
-        data = yaml.safe_load(f)
-    return Config(data)
-
-
-def get_rl_algo(name):
-    name = name.lower()
-    algos = {
-        "ppo": PPO,
-        "sac": SAC,
-        "ddpg": DDPG
-    }
-    if name not in algos:
-        raise ValueError(f"RL Algo '{name}' non reconnue. Choisis parmi : {list(algos.keys())}")
-    return algos[name]
+from ros_gym_env.utils.config import load_ros2_package_config, get_rl_algo, get_latest_log_dir
 
 class RLTrainerNode(Node):
     def __init__(self):
         super().__init__('rl_trainer_node')
 
         # self.config_name = "training_002.yaml"
-        self.config_name = "simple.yaml"
+        # self.config_name = "simple.yaml"
+        self.config_name = "hbsn.yaml"
         # self.config_name = "drl-vo_training.yaml"
+
         self.config = load_ros2_package_config("ros_gym_env", "config/"+self.config_name)
         model_name = "model/"
         self.model_path = os.path.join(get_package_share_directory("ros_gym_env"), model_name)
         self.use_model = False
 
-        self.curriculum = CurriculumManager(
-            max_level=self.config.learning.curriculum.max_level,
-            window_size=self.config.learning.curriculum.window_size,
-            epsilon=self.config.learning.curriculum.epsilon,
-            patience=self.config.learning.curriculum.patience
-        )
+        self.curriculum = CurriculumManager(self.config.learning.curriculum)
 
         # Env creation
         env_ids = np.arange(self.config.learning.num_envs)
@@ -125,6 +76,8 @@ class RLTrainerNode(Node):
                 normalize_advantage=True,
                 seed=self.config.algo.seed
             )
+        
+        self.env.set_model(self.model)
 
     def make_env(self, env_id):
         def _init():

@@ -100,11 +100,11 @@ class MyEnv(ROSEnv):
         # observation:
         self.observation = np.concatenate((obs), axis=None)
 
-        if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            self.node.get_logger().warning("\n\n", throttle_duration_sec=self.config.log.throttle_duration)
-            self.node.get_logger().warning(
-                "Observation ({}) => \n goal: {} \n dist_to_goal: {} \n vel: {} \n agents: {} \n scan: {}".format(self.observation.shape, normalized_angle, dist_to_goal, vel, self.agents, scan), 
-                throttle_duration_sec=self.config.log.throttle_duration)
+        # if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
+        #     self.node.get_logger().warning("\n\n", throttle_duration_sec=self.config.log.throttle_duration)
+        #     self.node.get_logger().warning(
+        #         "Observation ({}) => \n goal: {} \n dist_to_goal: {} \n vel: {} \n agents: {} \n scan: {}".format(self.observation.shape, normalized_angle, dist_to_goal, vel, self.agents, scan), 
+        #         throttle_duration_sec=self.config.log.throttle_duration)
         
         return self.observation
     
@@ -161,10 +161,10 @@ class MyEnv(ROSEnv):
             reward -= self.curr_vel.linear.x * 0.5
 
 
-        if ((self.env_id_display_log == self.env_id or self.env_id_display_log == None)):
-            self.node.get_logger().warning("Compute reward done. \nreward = {}     total🪙 = {}\n    rb: {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, self.reward_episode, r_b, r_g, r_c, r_w, r_t, r_h)
-                                           , throttle_duration_sec=self.config.log.throttle_duration
-                                           )
+        # if ((self.env_id_display_log == self.env_id or self.env_id_display_log == None)):
+        #     self.node.get_logger().warning("Compute reward done. \nreward = {}     total🪙 = {}\n    rb: {}\n    rg: {}\n    rc: {}\n    rw: {}\n    rt: {}\n    rh: {}".format(reward, self.reward_episode, r_b, r_g, r_c, r_w, r_t, r_h)
+        #                                    , throttle_duration_sec=self.config.log.throttle_duration
+        #                                    )
             # self.node.get_logger().warning("Dist Goal Arr: \n{}   {}\n{}   {}".format(self.num_iterations, self.dist_to_goal_reg, self.curr_pose.position, self.final_goal)
             #                                , throttle_duration_sec=self.config.log.throttle_duration
             #                                )
@@ -253,7 +253,8 @@ class MyEnv(ROSEnv):
     def _post_information(self, done):
         self.info = {
             "goal": self.goal,
-            "current_pose": self.curr_pose
+            "current_pose": self.curr_pose,
+            "episode_steps":self.num_iterations
             }
         
         if (done):

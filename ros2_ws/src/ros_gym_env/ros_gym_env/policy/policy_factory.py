@@ -3,6 +3,9 @@ from ros_gym_env.policy.drl_vo_cnn import DRL_VO_CNN
 # from ros_gym_env.policy.srnn import SRNN
 from ros_gym_env.policy.simple_policies import SimplePolicy, MultiModalFeatureExtractor
 from ros_gym_env.policy.mlagent_policy import MLAgentPolicy, MLAgentPolicyDiscrete, MLAgentFeatureExtractor
+from ros_gym_env.policy.my import MyPolicy, MyFeatureExtractor
+from ros_gym_env.policy.mygraph import MyGraphPolicy, MyGraphFeatureExtractor
+from ros_gym_env.policy.mygraph_v2 import MyGraphPolicyV2, MyGraphFeatureExtractorV2
 import torch.nn as nn
 
 def get_activation_fn(name):
@@ -47,4 +50,7 @@ method_factory['simple'] = Method(SimplePolicy, MultiModalFeatureExtractor)
 method_factory['drl-vo'] = Method("CnnPolicy", DRL_VO_CNN)
 method_factory['mlagent'] = Method(MLAgentPolicy, MLAgentFeatureExtractor)
 method_factory['mlagent-discret'] = Method(MLAgentPolicyDiscrete, MLAgentFeatureExtractor)
+method_factory['my'] = Method(MyPolicy, MyFeatureExtractor)
+method_factory['mygraph'] = Method(MyGraphPolicy, MyGraphFeatureExtractor)
+method_factory['mygraphv2'] = Method(MyGraphPolicyV2, MyGraphFeatureExtractorV2)
 # method_factory['srnn'] = SRNN_OLD

@@ -13,6 +13,7 @@ from cnn_msgs.msg import CNNdata, MyCNNdata, AllCNNdata
 from agents_msgs.msg import AgentArray, Agent
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry, Path
+from visualization_msgs.msg import Marker
 from tf_transformations import euler_from_quaternion
 
 
@@ -24,8 +25,7 @@ class ROSEnv(gym.Env, ABC):
     def __init__(self, env_id, config, env_id_display_log=None):
         super().__init__()
         self.config = config
-        self.curriculum_level = 0
-        
+
         # env parameters:
         self.env_id = env_id
         self.env_id_display_log = env_id_display_log
@@ -45,6 +45,10 @@ class ROSEnv(gym.Env, ABC):
         self.scan_history = self.config.env.obs.scan_history
         self.scan_buffer = []
 
+        # human
+        self.human_history = self.config.env.obs.human_history
+        self.agents_buffer = []
+
         self.num_iterations = 0
         
         self.info = {}
@@ -56,6 +60,10 @@ class ROSEnv(gym.Env, ABC):
 
         self.ros_debug = self.config.log.ros
         
+        # curriculum
+        self.curriculum_level = 0
+        self.cl_level = self.config.learning.curriculum.level
+
         # === ROS ===
         self.node = Node("ros_env_" + str(self.env_id))
 
@@ -72,15 +80,16 @@ class ROSEnv(gym.Env, ABC):
 
         if self.ros_debug:
             self.debug_scan_pub = self.node.create_publisher(LaserScan, f"{self.prefix}/debug/scan", 10)
+            self._marker_publishers = {}
 
         # === Services ===
         self.reset_client = self.node.create_client(Reset, self.prefix + self.config.env.ros.reset_service)
         while not self.reset_client.wait_for_service(timeout_sec=1.0):
-            self.node.get_logger().info('Attente du service de reset...')
+            self.node.get_logger().fatal('Attente du service de reset...')
         
         self.play_client = self.node.create_client(PausePlay, self.prefix + self.config.env.ros.play_service)
         while not self.play_client.wait_for_service(timeout_sec=1.0):
-            self.node.get_logger().info('Attente du service de play...')
+            self.node.get_logger().fatal('Attente du service de play...')
 
         self.set_action_space()
         self.set_observation_space()
@@ -97,23 +106,8 @@ class ROSEnv(gym.Env, ABC):
 
     def agents_callback(self, msg: AgentArray):
 
-        # Position robot pour les calculs relatifs
-        if self.curr_pose is None:
-            robot_x, robot_y = 0.0, 0.0
-            robot_yaw = 0.0
-        else:
-            robot_x = self.curr_pose.position.x
-            robot_y = self.curr_pose.position.y
-            orientation_q = self.curr_pose.orientation
-            _, _, robot_yaw = euler_from_quaternion([
-                orientation_q.x,
-                orientation_q.y,
-                orientation_q.z,
-                orientation_q.w
-            ])
-
-        self.agents = [(0.0, 0.0, 0.0, 0.0, 0.0) for i in range(self.human_number)]
-
+        agents = [(0.0, 0.0, 0.0, 0.0, 0.0) for i in range(self.human_number)]
+        
         for i in range(len(msg.agents)):
             if i >= self.human_number:
                 break
@@ -124,19 +118,14 @@ class ROSEnv(gym.Env, ABC):
             y = agent.pose.position.y
             vx = agent.velocity.linear.x
             vy = agent.velocity.linear.y
+            dist = math.sqrt(x**2 + y**2)
 
-            dx = x - robot_x
-            dy = y - robot_y
-            # Rotation dans le repère local du robot (x: avant/arrière, y: gauche/droite)
-            dx_local = cos(-robot_yaw) * dx - sin(-robot_yaw) * dy
-            dy_local = sin(-robot_yaw) * dx + cos(-robot_yaw) * dy
+            agents[i] = np.array((x, y, vx, vy, dist), dtype=np.float32)
 
-            vx_local = cos(-robot_yaw) * vx - sin(-robot_yaw) * vy
-            vy_local = sin(-robot_yaw) * vx + cos(-robot_yaw) * vy
-            dist = math.sqrt(dx**2 + dy**2)
-
-            self.agents[i] = (dx_local, dy_local, vx, vy, dist)
-            # self.agents[i] = (dx_local, dy_local, vx_local, vy_local, dist)
+        self.agents_buffer.append(agents.copy())
+        if len(self.agents_buffer) >= self.human_history:
+            self.agents = self.agents_buffer #[arr for arr in self.agents_buffer]
+            self.agents_buffer = self.agents_buffer[1:]
 
     def global_path_callback(self, msg):
         self.global_path = msg
@@ -246,8 +235,13 @@ class ROSEnv(gym.Env, ABC):
         if(self._reset): 
             self._reset = False
             req = Reset.Request()
-            req.level = self.curriculum_level
+            dataset_name, min_h, max_h = self.get_scenario_from_curriculum_level()
+            if dataset_name is not None:
+                req.dataset = dataset_name
+                req.min_human = min_h
+                req.max_human = max_h
             future = self.reset_client.call_async(req)
+
             rclpy.spin_until_future_complete(self.node, future)
 
         self.agents = None
@@ -313,10 +307,6 @@ class ROSEnv(gym.Env, ABC):
 
         info = self._post_information(done)
 
-        if (self.env_id_display_log == self.env_id or self.env_id_display_log == None):
-            if done:
-                self.node.get_logger().fatal(f"🪙 Episode Reward : {self.reward_episode}")
-
         return obs, reward, done, truncated, info
 
     @abstractmethod
@@ -372,9 +362,58 @@ class ROSEnv(gym.Env, ABC):
 
         self.debug_scan_pub.publish(scan_msg)
 
-    def dist_to_goal(self):
+    def publish_marker(self, position, topic_name='debug_marker', marker_id=0,
+                       frame_id='map', color=(0.0, 1.0, 0.0, 1.0), scale=0.2,
+                       marker_type=Marker.SPHERE):
+        """
+        Publie un marker, crée le publisher automatiquement si nécessaire.
+        """
+        if topic_name not in self._marker_publishers:
+            self._marker_publishers[topic_name] = self.node.create_publisher(Marker, self.prefix + topic_name, 10)
+        
+        marker_pub = self._marker_publishers[topic_name]
+
+        marker = Marker()
+        marker.header.frame_id = "env_" + str(self.env_id) + "/" + frame_id
+        if self.raw_last_scan is not None:
+            marker.header.stamp = self.raw_last_scan.header.stamp
+        else:
+            marker.header.stamp = self.node.get_clock().now().to_msg()
+        marker.ns = "generic_marker"
+        marker.id = marker_id
+        marker.type = marker_type
+        marker.action = Marker.ADD
+
+        if len(position) == 2:
+            marker.pose.position.x = position[0]
+            marker.pose.position.y = position[1]
+            marker.pose.position.z = 0.0
+        elif len(position) == 3:
+            marker.pose.position.x = position[0]
+            marker.pose.position.y = position[1]
+            marker.pose.position.z = position[2]
+
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
+
+        marker.color.r = color[0]
+        marker.color.g = color[1]
+        marker.color.b = color[2]
+        marker.color.a = color[3]
+
+        marker.scale.x = scale
+        marker.scale.y = scale
+        marker.scale.z = scale
+
+        marker_pub.publish(marker)
+
+    def dist_to_goal(self, init_pose=None):
         total_distance = 0.0
         poses = self.global_path.poses
+        if init_pose is not None:
+            poses[0] = init_pose
 
         for i in range(len(poses) - 1):
             x1 = poses[i].pose.position.x
@@ -416,3 +455,11 @@ class ROSEnv(gym.Env, ABC):
         self.curriculum_level = level
         # self.max_iteration = self.config.env.max_iteration * (self.curriculum_level+1)
         self.node.get_logger().info(f"🎯 Changement de niveau de curriculum : {level}")
+
+    def get_scenario_from_curriculum_level(self):
+        if self.cl_level is None:
+            return None, None, None
+        return self.cl_level[min(self.curriculum_level, len(self.cl_level)-1)]
+        
+
+        
