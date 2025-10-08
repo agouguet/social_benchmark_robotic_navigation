@@ -19,8 +19,7 @@ from visualization_msgs.msg import Marker, MarkerArray # type: ignore
 from std_msgs.msg import Header # type: ignore
 from geometry_msgs.msg import PoseStamped # type: ignore
 from geometry_msgs.msg import Twist # type: ignore
-from nav_msgs.msg import Odometry
-from nav_msgs.msg import Path # type: ignore
+from nav_msgs.msg import Odometry, OccupancyGrid, Path # type: ignore
 from agents_msgs.msg import AgentArray # type: ignore
 from simulation_msgs.msg import SceneInfo # type: ignore
 from agents_msgs.msg import AgentArray, AgentTrajectories # type: ignore
@@ -50,6 +49,7 @@ class Interpreter(Node):
                 ('goal', "goal_pose"),
                 ('scene_info', "/social_sim/scene_info"),
                 ('polygon_map', "polygon_map"),
+                ('map', "map"),
                 ('robot_visibility_distance', 4.0),
                 ('global_path_topic', 'global_path'),
                 ('local_path_topic', 'local_path')
@@ -73,6 +73,7 @@ class Interpreter(Node):
         self._goal_topic_name = self.get_parameter('goal').value
         self._scene_info_topic_name = self.get_parameter('scene_info').value
         self._polygon_map_topic_name = self.get_parameter('polygon_map').value
+        self._map_topic_name = self.get_parameter('map').value
         self._robot_visibility_distance = self.get_parameter('robot_visibility_distance').value
         self.global_path_topic = self.get_parameter('global_path_topic').value
         self.local_path_topic = self.get_parameter('local_path_topic').value
@@ -103,6 +104,7 @@ class Interpreter(Node):
 
         # Scene
         self.scene_info_subscriber_ = self.create_subscription(SceneInfo, self._scene_info_topic_name, self.scene_info_callback, 10)
+        self.map_subscriber_ = self.create_subscription(OccupancyGrid, self._map_topic_name, self.map_callback, 10)
 
         # Map
         # self.local_map_subscriber_ = self.create_subscription(OccupancyGrid, '/local_costmap/costmap', self.local_map_callback, 10)
@@ -127,6 +129,16 @@ class Interpreter(Node):
                 map_config_path = package_share_directory+"/maps/"+self.scenario+"/"
                 self.polygonal_map = PolygonalMap(map_config_path, type=self.polygon_type , polygon_size=self.polygon_size, area_minimum=POURCENTAGE_AREA_OF_POLYGON_ACCEPTABLE)
 
+    def map_callback(self, msg_map):
+        if self.polygonal_map is None:
+            resolution = msg_map.info.resolution
+            origin = [
+                msg_map.info.origin.position.x,
+                msg_map.info.origin.position.y,
+                msg_map.info.origin.position.z
+            ]
+            data = msg_map.data
+            self.polygonal_map = PolygonalMap(data, resolution=resolution, origin=origin)
 
     def goal_callback(self, msg_goal):
         pos = msg_goal.pose.position

@@ -5,9 +5,6 @@ from matplotlib import pyplot as plt, image
 import numpy as np
 import yaml
 import cv2
-from PIL import Image
-from numpy import asarray
-# from importlib.resources import files
 from importlib_resources import files
 
 from .py_floor_plan_segmenter.modules import do_segment
@@ -72,18 +69,3 @@ class Map():
                 cv2.imwrite(self.path + "/segmented.png", self._segmented) # Save the image
                 print("Segmented image saved in share folder.")
             return self._segmented
-            
-if __name__ == "__main__":
-    map_config_path = "/home/adam/Desktop/SBSN/ros2_ws/src/assets/maps/hospital/"
-
-    map = Map(map_config_path)
-
-    matplotlib.use('Qt5Agg')
-    fig = plt.figure()
-    axes = fig.add_subplot(111)
-    axes.imshow(map.color)
-    figManager = plt.get_current_fig_manager()
-    # figManager.window.showMaximized()
-    axes.axis('off')
-    axes.set_aspect('equal', adjustable='box')
-    plt.show()

@@ -15,12 +15,9 @@ windows:
         #ROS2
         - bridge_unity:
           - ros2 run ros_tcp_endpoint default_server_endpoint
-        - map_publisher:
-          - ros2 run unity_sim map_publisher.py
-        - map_republisher:
-          - ros2 run unity_sim map_republisher.py
+        - map_proxy:
+          - ros2 run robotsnap map_proxy.py
         - rviz:
-          - ros2 launch unity_sim rviz.launch.py
-        - trial:
-          - cd ../..
-          - ros2 run social_metrics record_metrics.py --ros-args -p method:=drl_vo
+          - ros2 launch robotsnap rviz.launch.py
+        - manager:
+          - ros2 run robotsnap experiment_manager.py

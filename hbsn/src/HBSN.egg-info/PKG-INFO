@@ -8,6 +8,7 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.0
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: pyyaml
 Requires-Dist: opencv-python
 Requires-Dist: matplotlib
@@ -19,6 +20,7 @@ Requires-Dist: scikit-image
 Requires-Dist: sortedcontainers
 Requires-Dist: flatdict
 Requires-Dist: importlib_resources
+Dynamic: license-file
 
 
 Install conda : https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html

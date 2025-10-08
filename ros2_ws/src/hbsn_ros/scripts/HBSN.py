@@ -98,23 +98,39 @@ class MBSNNode(Interpreter):
         return False
 
     def update(self):
-        self.mdp = HBSN(self.polygonal_map, self.robot_position, self.goal, human_trajectory_prediction_function=simple_human_trajectory_prediction, visibility_distance=self._robot_visibility_distance)
+        # Safety checks
+        if self.polygonal_map is None:
+            return
+        if self.robot_position is None or self.goal is None or self.global_path is None:
+            return
+        
 
-        # ROBOT/GOAL CELLS
+        # Rebuild MDP (HBSN) for the current map and robot/goal
+        self.mdp = HBSN(
+            self.polygonal_map,
+            self.robot_position,
+            self.goal,
+            human_trajectory_prediction_function=simple_human_trajectory_prediction,
+            visibility_distance=self._robot_visibility_distance
+        )
+
+        # ROBOT/GOAL CELLS (IDs)
         robot_cell  = get_cell_id_in_dict_from_continuous_position(self.polygonal_map.grid, self.robot_position)
         goal_cell = get_cell_id_in_dict_from_continuous_position(self.polygonal_map.grid, self.goal)
 
+        # Publish viz if robot cell changed
         if robot_cell != self.robot_cell:
             self.publish_polygon_map_vizualisation()
         self.robot_cell = robot_cell
 
-        if self.robot_cell  == goal_cell:
+        # If we're already at the goal cell, publish trivial local path
+        if self.robot_cell == goal_cell:
             self.publish_local_path([self.robot_position, self.goal])
+            return
 
-        # LOCAL GOAL
+        # LOCAL GOAL: follow global_path as far as possible inside mdp.polygons
         mbsn_goal_id = self.robot_cell 
         path = []
-        
         for pose in self.global_path:
             pose_cell_id = get_cell_id_in_dict_from_continuous_position(self.polygonal_map.grid, pose)
             if pose_cell_id in self.mdp.polygons:
@@ -122,51 +138,108 @@ class MBSNNode(Interpreter):
                 path.append(pose_cell_id)
             else:
                 break
-        mbsn_goal = self.mdp.polygons[mbsn_goal_id].polygon.centroid
+        mbsn_goal_point = self.mdp.polygons[mbsn_goal_id].polygon.centroid
 
-
-        # HUMAN IN SCOPE
+        # Check if any human is in local scope
         human_in_local_scope = False
         for _, human in self.humans.items():
             if human.position.distance(self.robot_position) <= self._robot_visibility_distance:
                 human_in_local_scope = True
 
-        # PATH
+        # If no humans in scope, deduplicate path and go
         if not human_in_local_scope:
-            path  = list(dict.fromkeys(path))
+            path = list(dict.fromkeys(path))
         else:
+            # Start building a local path from current robot cell
             path = [self.robot_cell]
+
+            # compute distances to humans and early stop if someone is too close
             humans_distance = {}
             for id, human in self.humans.items():
                 humans_distance[id] = human.position.distance(self.robot_position)
                 if humans_distance[id] <= LIMIT_DISTANCE_WITH_HUMAN_TO_MOVING:
                     self.publish_local_path([self.robot_position])
                     return
+
+            # sort humans by distance and build ordered humans positions list
             humans_distance = {k: v for k, v in sorted(humans_distance.items(), key=lambda item: item[1])}
-            closest_humans = np.array([self.humans[id] for id in humans_distance.keys()])[:]
-            while 1:
-                state = State(path[-1], closest_humans)
-                action = heuristic_score_based(self.mdp, state, goal=mbsn_goal, previous_path=self.path, 
-                                               w1=4.0, 
-                                               w2=15.0, 
-                                               w3=1.0, 
-                                               w4=1.0,
-                                               w5=1.0,
-                                               limit=1.0)
+            humans_positions_sorted = [tuple(self.humans[id].position.coords[0]) for id in humans_distance.keys()]
 
-                if len(path) >= 2 and action == path[-2]:
+            # iterate to extend local path using the new heuristic
+            while True:
+                current_cell = path[-1]
+                # neighbors are Polygon objects stored in self.mdp.polygons[cell].neighbors
+                if current_cell not in self.mdp.polygons:
                     break
-                path.append(action)
+                neighbors = self.mdp.polygons[current_cell].neighbors
+                if not neighbors:
+                    break
 
+                # actions are the centroids of neighbor polygons (as tuples)
+                actions = [tuple(p.polygon.centroid.coords[0]) for p in neighbors]
+
+                # current robot position for heuristic: use centroid of current_cell polygon
+                current_position = tuple(self.mdp.polygons[current_cell].polygon.centroid.coords[0])
+
+                # previous_path as list of coordinate tuples (if self.path exists and is list of cell ids)
+                previous_coords = []
+                if hasattr(self, "path") and self.path:
+                    # self.path may contain cell ids; convert to centroids where available
+                    for cell_id in self.path:
+                        if cell_id in self.mdp.polygons:
+                            previous_coords.append(tuple(self.mdp.polygons[cell_id].polygon.centroid.coords[0]))
+
+                # Call the new heuristic
+                best_action = heuristic_score_based(
+                    robot=current_position,
+                    goal=(mbsn_goal_point.x, mbsn_goal_point.y),
+                    actions=actions,
+                    previous_path=previous_coords,
+                    humans=humans_positions_sorted,
+                    w1=4.0,
+                    w2=15.0,
+                    w3=1.0,
+                    w4=1.0,
+                    w5=1.0,
+                    limit=1.0
+                )
+
+                # If heuristic returns None or no valid action, stop
+                if best_action is None:
+                    break
+
+                # Map the chosen action (coordinate) back to a polygon cell id
+                next_cell = get_cell_id_in_dict_from_continuous_position(self.polygonal_map.grid, best_action)
+
+                # If mapping failed or next_cell is None, we cannot continue
+                if next_cell is None:
+                    break
+
+                # loop prevention: if we go back to previous cell, break
+                if len(path) >= 2 and next_cell == path[-2]:
+                    break
+
+                path.append(next_cell)
+
+        # Build local_path as sequence of centroids at intersections between successive polygons
         local_path = []
-        for id in range(1, len(path)):
-            prev_poly = self.mdp.polygons[path[id-1]].polygon.buffer(0.05)
-            next_poly = self.mdp.polygons[path[id]].polygon.buffer(0.05)
-            local_path.append(prev_poly.intersection(next_poly).centroid)
+        for idx in range(1, len(path)):
+            if path[idx] not in self.mdp.polygons:
+                break
+            prev_poly = self.mdp.polygons[path[idx-1]].polygon.buffer(0.05)
+            next_poly = self.mdp.polygons[path[idx]].polygon.buffer(0.05)
+            inter = prev_poly.intersection(next_poly)
+            if not inter.is_empty:
+                local_path.append(inter.centroid)
+            else:
+                # fallback to centroid of next polygon if intersection is empty
+                local_path.append(self.mdp.polygons[path[idx]].polygon.centroid)
 
+        # Replace first point by actual robot position if we have >1 point
         if len(local_path) > 1:
             local_path[0] = self.robot_position
 
+        # If goal_cell is inside mdp.polygons then append actual goal
         if goal_cell in self.mdp.polygons:
             local_path.append(self.goal)
 

@@ -12,6 +12,7 @@ windows:
         #ROS2
         - bridge_unity:
           - ros2 run ros_tcp_endpoint default_server_endpoint
+
         - global_path:
           - ros2 run base_nav global_planner.py
         - hbsn:
@@ -24,7 +25,7 @@ windows:
         - visualization_trajs:
           - ros2 run agent_trajectory_prediction agent_trajectory_prediction_visualization.py
 
-        - map_proxy:
+        - map_publisher:
           - ros2 run robotsnap map_proxy.py
         - rviz:
           - ros2 launch robotsnap rviz.launch.py

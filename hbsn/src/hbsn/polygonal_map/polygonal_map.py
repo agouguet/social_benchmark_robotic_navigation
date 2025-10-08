@@ -14,8 +14,22 @@ POURCENTAGE_AREA_OF_POLYGON_ACCEPTABLE = 0.85
 
 class PolygonalMap(Map, Polygon):
 
-    def __init__(self, map, type='hexagon', polygon_size=0.5, area_minimum = POURCENTAGE_AREA_OF_POLYGON_ACCEPTABLE):
-        Map.__init__(self, map)
+    def __init__(
+        self,
+        map_or_data,
+        type='hexagon',
+        polygon_size=0.5,
+        area_minimum=POURCENTAGE_AREA_OF_POLYGON_ACCEPTABLE,
+        resolution=None,
+        origin=None
+    ):
+        if isinstance(map_or_data, str):
+            Map.__init__(self, map_or_data)
+        else:
+            if resolution is None or origin is None:
+                raise ValueError("Resolution or origin incorrect.")
+            self.from_array(map_or_data, resolution, origin)
+        
         self._polygon = None
         self._grid = None
         self._type = type
@@ -27,12 +41,46 @@ class PolygonalMap(Map, Polygon):
         if "\\" in map_name or "/" in map_name:
             return map_name
 
+    def from_array(self, data, resolution, origin):
+        """
+        Initialise la carte à partir d'un tableau OccupancyGrid-like :
+        data : list[int] ou np.ndarray
+        resolution : float
+        origin : [x, y, z]
+        """
+        data = np.array(data, dtype=np.int8)
+
+        # Si data est 1D → on suppose une carte carrée
+        if data.ndim == 1:
+            size = int(np.sqrt(len(data)))
+            if size * size != len(data):
+                raise ValueError("Données non carrées et pas de forme (h, w) connue.")
+            height, width = size, size
+            data = data.reshape((height, width))
+        else:
+            height, width = data.shape
+
+        # Création d'une image couleur pour cohérence avec la classe Map
+        img = np.zeros((height, width, 3), dtype=np.uint8)
+        img[data == 100] = (0, 0, 0)       # occupé
+        img[data == 0] = (255, 255, 255)   # libre
+        img[data == -1] = (127, 127, 127)  # inconnu
+
+        # Orientation ROS (origine bas-gauche)
+        self.path = None
+        self._color = cv2.flip(img, 0)
+        self._gray = None
+        self._segmented = None
+        self.config = {
+            "resolution": resolution,
+            "origin": origin
+        }
+
     @property
     def polygon(self):
         if self._polygon is not None:
             return self._polygon
         
-        print(self.config)
         scale_factor = self.config["resolution"]
         origin = self.config["origin"]
 
