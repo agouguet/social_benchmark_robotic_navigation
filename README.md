@@ -1,5 +1,7 @@
 # Benchmark for Social Robotic Navigation
 
+![](./banner.png)
+
 This repository contains a benchmark for robotic social navigation. An evaluation was made comparing several baselines from the literature according to different metrics, performance and social.
 This benchmark is based on [SEAN](https://sean.interactive-machines.com), which is a simulator running under Unity3d allowing you to compare methods using metrics.
 On this new version, we have added the possibility of testing navigation methods under ROS2 by upgrading the simulator to ROS2. We added metrics and offered six everyday life scenarios, crowded and sparse scenarios.
